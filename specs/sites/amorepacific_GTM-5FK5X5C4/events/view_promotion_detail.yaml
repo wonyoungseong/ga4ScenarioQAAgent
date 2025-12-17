@@ -1,0 +1,54 @@
+# view_promotion_detail 이벤트 스펙
+# GA4 이벤트: 프로모션 상세 페이지 조회
+
+event: view_promotion_detail
+ga4_event_name: view_promotion_detail
+dataLayer_event: "(GTM 자동 트리거)"
+trigger_timing: "프로모션/이벤트 상세 페이지 로드 시"
+required: false
+
+description: |
+  사용자가 프로모션/이벤트 상세 페이지를 조회할 때 발생하는 이벤트입니다.
+  view_promotion은 메인 배너 노출 시, view_promotion_detail은 상세 페이지 조회 시 발생합니다.
+
+parameters:
+  # 프로모션 ID
+  - ga4_param: promotion_id
+    dev_guide_var: AP_PROMO_ID
+    gtm_variable: "{{JS - Promo ID}}"
+    data_type: string
+    description: "조회한 프로모션/이벤트 ID"
+    example: "3224"
+    required: true
+
+  # 프로모션 이름
+  - ga4_param: promotion_name
+    dev_guide_var: AP_PROMO_NAME
+    gtm_variable: "{{JS - Promo Name}}"
+    data_type: string
+    description: "조회한 프로모션/이벤트명"
+    example: "속탄력부터 끌어올리는 NEW 콜라겐 탄력장벽 크림"
+    required: true
+
+  # 페이지 타입
+  - ga4_param: page_type
+    dev_guide_var: AP_DATA_PAGETYPE
+    gtm_variable: "{{JS - Page Type}}"
+    data_type: string
+    description: "페이지 타입"
+    example: "EVENT_DETAIL"
+    required: true
+    validation: "EVENT_DETAIL"
+
+related_events:
+  - event: view_promotion
+    description: "메인 배너 영역에서 프로모션 노출 시"
+
+  - event: select_promotion
+    description: "메인 배너 영역에서 프로모션 클릭 시"
+
+verification_notes:
+  - "프로모션/이벤트 상세 페이지에서만 발생"
+  - "AP_DATA_PAGETYPE이 EVENT_DETAIL인 경우"
+  - "AP_PROMO_ID, AP_PROMO_NAME은 공통 변수에서 선언됨"
+  - "GTM parser를 통해 실제 파라미터 매핑 확인 필요"

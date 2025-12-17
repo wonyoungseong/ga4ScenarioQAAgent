@@ -1,0 +1,61 @@
+# view_promotion 이벤트 스펙
+# GA4 E-Commerce 이벤트: 프로모션 노출
+
+event: view_promotion
+ga4_event_name: view_promotion
+dataLayer_event: "(HTML 속성 기반)"
+trigger_timing: "메인 페이지 로드 시 (key visual 영역에 프로모션이 노출되는 경우)"
+required: true
+required_condition: "메인 key visual 영역에 프로모션이 노출되는 사이트만 해당"
+
+description: |
+  메인 페이지의 key visual 영역에 프로모션 배너가 노출될 때 발생하는 이벤트입니다.
+  select_promotion과 함께 프로모션 노출/클릭을 추적합니다.
+  HTML 속성(ap-data-promotion)을 통해 데이터를 전달합니다.
+
+parameters:
+  # 프로모션 ID
+  - ga4_param: promotion_id
+    dev_guide_var: promotion_id
+    gtm_variable: "{{DL - View Promotion ID}}"
+    data_type: string
+    description: "프로모션 ID"
+    example: "9674"
+    required: true
+
+  # 프로모션 이름
+  - ga4_param: promotion_name
+    dev_guide_var: promotion_name
+    gtm_variable: "{{DL - View Promotion Name}}"
+    data_type: string
+    description: "프로모션 이름"
+    example: "쇼핑홀리데이 in 아모레몰 (9.22~9.24)"
+    required: true
+
+  # 프로모션 위치
+  - ga4_param: creative_slot
+    dev_guide_var: creative_slot
+    gtm_variable: "{{DL - View Promotion Slot}}"
+    data_type: string
+    description: "프로모션 게재 위치"
+    example: "메인 배너"
+    required: true
+
+html_attribute_example: |
+  <!-- 메인 key visual 영역의 모든 프로모션 a 태그에 HTML 속성 추가 -->
+  <a ap-data-promotion="{
+    'promotion_id': '9674',
+    'promotion_name': 'NCT 127 젤 네일 출시',
+    'creative_slot': '메인 배너'
+  }"> …... </a>
+
+related_events:
+  - event: select_promotion
+    description: "프로모션을 클릭할 때 발생"
+    trigger: "메인 key visual 영역의 프로모션 클릭 시"
+
+verification_notes:
+  - "HTML 속성(ap-data-promotion)을 통해 데이터 전달"
+  - "메인 key visual 영역의 모든 프로모션 a 태그에 속성 추가 필요"
+  - "view_promotion은 노출 시, select_promotion은 클릭 시 발생"
+  - "GTM parser를 통해 실제 파라미터 매핑 확인 필요"

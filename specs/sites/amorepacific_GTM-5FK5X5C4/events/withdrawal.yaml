@@ -1,0 +1,71 @@
+# withdrawal 이벤트 스펙
+# GA4 이벤트: 회원탈퇴 완료
+
+event: withdrawal
+ga4_event_name: withdrawal
+dataLayer_event: withdrawal_complete
+trigger_timing: "회원탈퇴를 완료했을 시 (유효성 검사 통과 후)"
+required: true
+required_condition: "로그인 기능이 있는 사이트만 해당"
+
+description: |
+  사용자가 회원탈퇴를 성공적으로 완료할 때 발생하는 이벤트입니다.
+  탈퇴 사유가 포함됩니다.
+
+parameters:
+  # dataLayer event
+  - ga4_param: event
+    dev_guide_var: event
+    gtm_variable: "{{_event}}"
+    data_type: string
+    description: "GTM 트리거 이벤트명"
+    example: "withdrawal_complete"
+    required: true
+
+  # 이벤트 카테고리
+  - ga4_param: event_category
+    dev_guide_var: event_category
+    gtm_variable: "{{DL - Event Category}}"
+    data_type: string
+    description: "이벤트 이름을 보충 설명하는 카테고리 값"
+    example: "withdrawal"
+    required: true
+
+  # 이벤트 액션
+  - ga4_param: event_action
+    dev_guide_var: event_action
+    gtm_variable: "{{DL - Event Action}}"
+    data_type: string
+    description: "이벤트 이름을 보충 설명하는 액션 값"
+    example: "withdrawal complete"
+    required: true
+
+  # 이벤트 라벨 (탈퇴 사유)
+  - ga4_param: event_label
+    dev_guide_var: event_label
+    gtm_variable: "{{DL - Event Label}}"
+    data_type: string
+    description: "회원탈퇴 사유"
+    example: "자주 접속하지 않아서"
+    required: true
+
+dataLayer_example: |
+  window.dataLayer.push({
+    'event': 'withdrawal_complete',
+    'event_category': 'withdrawal',
+    'event_action': 'withdrawal - complete',
+    'event_label': '자주 접속하지 않아서'
+  });
+
+withdrawal_reason_examples:
+  - "자주 접속하지 않아서"
+  - "원하는 상품이 없어서"
+  - "다른 사이트 이용"
+  - "개인정보 보호 우려"
+  - "서비스 불만족"
+  - "기타"
+
+verification_notes:
+  - "event_label은 탈퇴 사유를 나타냄"
+  - "유효성 검사 통과 후에만 이벤트 발생"
+  - "GTM parser를 통해 실제 파라미터 매핑 확인 필요"

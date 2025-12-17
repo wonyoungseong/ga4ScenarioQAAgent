@@ -1,0 +1,832 @@
+#!/usr/bin/env node
+
+import { config } from 'dotenv';
+config(); // .env 파일 로드
+
+import { Command } from 'commander';
+import chalk from 'chalk';
+import * as fs from 'fs';
+import * as path from 'path';
+import { ScenarioAgent } from './agent';
+import { GA4Client, GA4AdminClient } from './ga4';
+
+const program = new Command();
+
+program
+  .name('scenario-agent')
+  .description('Vision AI 기반 QA 자동화 시나리오 생성 에이전트')
+  .version('2.0.0');
+
+program
+  .command('analyze')
+  .description('웹 페이지를 Vision AI로 분석하고 이벤트 시나리오를 생성합니다')
+  .requiredOption('-u, --url <url>', '분석할 페이지 URL')
+  .requiredOption('-e, --event <event>', '분석할 이벤트 이름 (예: select_item, view_item)')
+  .option('-s, --site <siteId>', '사이트 ID (예: amorepacific_GTM-5FK5X5C4)')
+  .option('-o, --output <dir>', '결과 출력 디렉토리', './output')
+  .option('-g, --guides <dir>', '가이드 문서 디렉토리', './guides')
+  .option('--specs <dir>', '스펙 문서 디렉토리', './specs')
+  .option('-k, --api-key <key>', 'Gemini API 키 (또는 GEMINI_API_KEY 환경변수 사용)')
+  .option('--gtm <path>', 'GTM JSON 파일 경로')
+  .action(async (options) => {
+    console.log(chalk.cyan('\n╔════════════════════════════════════════════════════════════════╗'));
+    console.log(chalk.cyan('║') + chalk.yellow.bold('         🤖 Vision AI 시나리오 에이전트 v2.1.0                 ') + chalk.cyan('║'));
+    console.log(chalk.cyan('║') + chalk.gray('         Gemini Vision + 사이트별 스펙 기반 QA 자동화          ') + chalk.cyan('║'));
+    console.log(chalk.cyan('╚════════════════════════════════════════════════════════════════╝\n'));
+
+    try {
+      const agent = new ScenarioAgent({
+        outputDir: options.output,
+        guidesDir: options.guides,
+        specsDir: options.specs,
+        geminiApiKey: options.apiKey,
+        gtmJsonPath: options.gtm,
+        siteId: options.site
+      });
+
+      // 사이트 ID가 지정되었으면 표시
+      if (options.site) {
+        console.log(chalk.blue(`📋 사이트 스펙 사용: ${options.site}`));
+      }
+
+      await agent.analyze(options.url, options.event.toLowerCase(), options.site);
+
+      console.log(chalk.green('\n✨ Vision AI 분석 완료!'));
+    } catch (error: any) {
+      console.error(chalk.red(`\n❌ 오류 발생: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+program
+  .command('sites')
+  .description('등록된 사이트 목록을 표시합니다')
+  .option('--specs <dir>', '스펙 문서 디렉토리', './specs')
+  .action((options) => {
+    console.log(chalk.cyan('\n🏢 등록된 사이트 목록:\n'));
+
+    const sitesDir = path.join(options.specs, 'sites');
+    if (!fs.existsSync(sitesDir)) {
+      console.log(chalk.yellow('사이트 디렉토리가 없습니다. specs/sites/ 폴더를 생성하세요.'));
+      return;
+    }
+
+    const sites = fs.readdirSync(sitesDir).filter(f => {
+      const sitePath = path.join(sitesDir, f);
+      return fs.statSync(sitePath).isDirectory();
+    });
+
+    if (sites.length === 0) {
+      console.log(chalk.yellow('등록된 사이트가 없습니다.'));
+      return;
+    }
+
+    sites.forEach(site => {
+      const configPath = path.join(sitesDir, site, 'site_config.yaml');
+      let siteName = site;
+
+      if (fs.existsSync(configPath)) {
+        try {
+          const yaml = require('js-yaml');
+          const config = yaml.load(fs.readFileSync(configPath, 'utf-8'));
+          siteName = config.site_info?.name || site;
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      // 이벤트 수 세기
+      const eventsDir = path.join(sitesDir, site, 'events');
+      let eventCount = 0;
+      if (fs.existsSync(eventsDir)) {
+        eventCount = fs.readdirSync(eventsDir).filter(f => f.endsWith('.yaml')).length;
+      }
+
+      console.log(chalk.yellow(`  ${site}`));
+      console.log(chalk.gray(`    이름: ${siteName}`));
+      console.log(chalk.gray(`    이벤트 스펙: ${eventCount}개`));
+      console.log('');
+    });
+
+    console.log(chalk.gray('사용 방법: npx ts-node src/cli.ts analyze -u <URL> -e <EVENT> -s <SITE_ID>'));
+  });
+
+program
+  .command('events')
+  .description('사용 가능한 이벤트 목록을 표시합니다')
+  .option('-g, --guides <dir>', '가이드 문서 디렉토리', './guides')
+  .option('-s, --site <siteId>', '사이트 ID (사이트별 이벤트 표시)')
+  .option('--specs <dir>', '스펙 문서 디렉토리', './specs')
+  .action((options) => {
+    console.log(chalk.cyan('\n📋 사용 가능한 이벤트 목록:\n'));
+
+    const guidesDir = options.guides;
+    if (!fs.existsSync(guidesDir)) {
+      console.log(chalk.yellow('가이드 디렉토리가 없습니다. guides/ 폴더를 생성하세요.'));
+      return;
+    }
+
+    const files = fs.readdirSync(guidesDir).filter(f => f.endsWith('.md'));
+
+    if (files.length === 0) {
+      console.log(chalk.yellow('정의된 이벤트가 없습니다. guides/ 폴더에 이벤트 가이드 파일을 추가하세요.'));
+      return;
+    }
+
+    files.forEach(file => {
+      const eventName = file.replace('.md', '');
+      const content = fs.readFileSync(path.join(guidesDir, file), 'utf-8');
+
+      // 첫 번째 ## 이벤트 정의 섹션에서 설명 추출
+      const descMatch = content.match(/## 이벤트 정의\n([^\n]+)/);
+      const description = descMatch ? descMatch[1].trim() : '설명 없음';
+
+      console.log(chalk.yellow(`  ${eventName}`));
+      console.log(chalk.gray(`    ${description}`));
+      console.log('');
+    });
+
+    console.log(chalk.gray('새 이벤트를 추가하려면 guides/<EVENT_NAME>.md 파일을 생성하세요.'));
+  });
+
+program
+  .command('init')
+  .description('새 이벤트 가이드 템플릿을 생성합니다')
+  .argument('<eventName>', '생성할 이벤트 이름')
+  .option('-g, --guides <dir>', '가이드 문서 디렉토리', './guides')
+  .action((eventName, options) => {
+    const guidesDir = options.guides;
+
+    if (!fs.existsSync(guidesDir)) {
+      fs.mkdirSync(guidesDir, { recursive: true });
+    }
+
+    const filePath = path.join(guidesDir, `${eventName.toUpperCase()}.md`);
+
+    if (fs.existsSync(filePath)) {
+      console.log(chalk.yellow(`이미 존재하는 이벤트입니다: ${filePath}`));
+      return;
+    }
+
+    const template = `# ${eventName.toUpperCase()} 이벤트 가이드
+
+## 이벤트 정의
+[이 이벤트가 언제 발생해야 하는지 설명하세요]
+
+## 시각적 판단 기준
+
+### 이벤트가 발생해야 하는 요소 (Should Fire)
+
+1. **요소 유형 1**
+   - 설명
+   - 시각적 특징
+
+2. **요소 유형 2**
+   - 설명
+   - 시각적 특징
+
+### 이벤트가 발생하면 안 되는 요소 (Should NOT Fire)
+
+1. **요소 유형 1**
+   - 설명
+   - 대신 어떤 이벤트가 발생해야 하는지
+
+2. **요소 유형 2**
+   - 설명
+   - 대신 어떤 이벤트가 발생해야 하는지
+
+## 시각적 특징 (Visual Cues)
+
+이 이벤트의 대상 요소를 식별하는 시각적 단서:
+- 특징 1
+- 특징 2
+- 특징 3
+
+## 예시 시나리오
+
+\`\`\`
+✅ Should Fire:
+- 예시 1
+- 예시 2
+
+❌ Should NOT Fire:
+- 예시 1
+- 예시 2
+\`\`\`
+
+## 데이터 스키마 (참고)
+
+\`\`\`javascript
+{
+  event: "${eventName.toLowerCase()}",
+  // 이벤트 데이터 구조
+}
+\`\`\`
+`;
+
+    fs.writeFileSync(filePath, template, 'utf-8');
+    console.log(chalk.green(`✅ 이벤트 가이드 템플릿 생성: ${filePath}`));
+    console.log(chalk.gray('\n파일을 열어 이벤트 가이드를 작성하세요.'));
+  });
+
+// ========================================
+// GA4 Data API Commands
+// ========================================
+
+const ga4 = program
+  .command('ga4')
+  .description('GA4 Data API 관련 명령어');
+
+// GA4 클라이언트 생성 헬퍼 (Access Token 방식)
+function createGA4ClientWithToken(propertyId: string, accessToken: string): GA4Client {
+  return new GA4Client({
+    propertyId,
+    accessToken,
+  });
+}
+
+// 저장된 토큰 또는 환경변수에서 Access Token 가져오기
+function getAccessToken(): string | null {
+  // 1. 환경변수에서 확인
+  if (process.env.GA4_ACCESS_TOKEN) {
+    return process.env.GA4_ACCESS_TOKEN;
+  }
+
+  // 2. 저장된 토큰 파일에서 확인
+  const tokenPath = './credentials/ga4_tokens.json';
+  if (fs.existsSync(tokenPath)) {
+    try {
+      const tokens = JSON.parse(fs.readFileSync(tokenPath, 'utf-8'));
+      return tokens.access_token || null;
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+ga4
+  .command('set-token')
+  .description('Access Token을 설정합니다 (Google OAuth Playground에서 발급)')
+  .requiredOption('-t, --token <accessToken>', 'Access Token')
+  .option('-p, --property <id>', 'GA4 Property ID')
+  .action(async (options) => {
+    console.log(chalk.cyan('\n🔑 GA4 Access Token 설정\n'));
+
+    const tokenPath = './credentials/ga4_tokens.json';
+    const dir = path.dirname(tokenPath);
+
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    const tokenData = {
+      access_token: options.token,
+      property_id: options.property || process.env.GA4_PROPERTY_ID,
+      saved_at: new Date().toISOString(),
+    };
+
+    fs.writeFileSync(tokenPath, JSON.stringify(tokenData, null, 2));
+    console.log(chalk.green(`✅ 토큰이 저장되었습니다: ${tokenPath}`));
+
+    if (tokenData.property_id) {
+      console.log(chalk.gray(`   Property ID: ${tokenData.property_id}`));
+    } else {
+      console.log(chalk.yellow('\n⚠️  Property ID가 설정되지 않았습니다.'));
+      console.log(chalk.gray('   .env 파일에 GA4_PROPERTY_ID를 추가하거나'));
+      console.log(chalk.gray('   명령어 실행 시 -p 옵션을 사용하세요.'));
+    }
+
+    console.log(chalk.blue('\n💡 토큰 발급 방법:'));
+    console.log(chalk.gray('   1. https://developers.google.com/oauthplayground/ 접속'));
+    console.log(chalk.gray('   2. Step 1: Google Analytics Admin API v1 + Data API v1 선택'));
+    console.log(chalk.gray('      - https://www.googleapis.com/auth/analytics.readonly'));
+    console.log(chalk.gray('      - https://www.googleapis.com/auth/analytics.edit (계정 조회용)'));
+    console.log(chalk.gray('   3. Authorize APIs 클릭 → Google 계정 로그인'));
+    console.log(chalk.gray('   4. Step 2: Exchange authorization code for tokens'));
+    console.log(chalk.gray('   5. Access token 복사'));
+  });
+
+ga4
+  .command('accounts')
+  .description('GA4 계정 목록을 조회합니다')
+  .option('-t, --token <accessToken>', 'Access Token')
+  .action(async (options) => {
+    console.log(chalk.cyan('\n📋 GA4 계정 목록\n'));
+
+    const accessToken = options.token || getAccessToken();
+    if (!accessToken) {
+      console.error(chalk.red('❌ Access Token이 필요합니다.'));
+      console.error(chalk.gray('   먼저 토큰을 설정하세요: npx ts-node src/cli.ts ga4 set-token -t <TOKEN>'));
+      process.exit(1);
+    }
+
+    try {
+      const adminClient = new GA4AdminClient(accessToken);
+      await adminClient.initialize();
+
+      const accounts = await adminClient.listAccounts();
+
+      if (accounts.length === 0) {
+        console.log(chalk.yellow('조회 가능한 계정이 없습니다.'));
+        return;
+      }
+
+      console.log(chalk.yellow(`  ${'계정 ID'.padEnd(15)} ${'계정명'}`));
+      console.log(chalk.gray('  ' + '-'.repeat(50)));
+
+      for (const account of accounts) {
+        console.log(`  ${account.accountId.padEnd(15)} ${account.displayName}`);
+      }
+
+      console.log(chalk.gray(`\n  총 ${accounts.length}개 계정`));
+      console.log(chalk.blue('\n💡 속성 조회: npx ts-node src/cli.ts ga4 properties -a <ACCOUNT_ID>'));
+    } catch (error: any) {
+      console.error(chalk.red(`❌ 오류: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+ga4
+  .command('properties')
+  .description('GA4 속성 목록을 조회합니다')
+  .option('-t, --token <accessToken>', 'Access Token')
+  .option('-a, --account <accountId>', '특정 계정 ID로 필터링')
+  .action(async (options) => {
+    console.log(chalk.cyan('\n🏠 GA4 속성 목록\n'));
+
+    const accessToken = options.token || getAccessToken();
+    if (!accessToken) {
+      console.error(chalk.red('❌ Access Token이 필요합니다.'));
+      process.exit(1);
+    }
+
+    try {
+      const adminClient = new GA4AdminClient(accessToken);
+      await adminClient.initialize();
+
+      const properties = await adminClient.listProperties(options.account);
+
+      if (properties.length === 0) {
+        console.log(chalk.yellow('조회 가능한 속성이 없습니다.'));
+        return;
+      }
+
+      console.log(chalk.yellow(`  ${'Property ID'.padEnd(15)} ${'속성명'.padEnd(30)} ${'시간대'}`));
+      console.log(chalk.gray('  ' + '-'.repeat(70)));
+
+      for (const prop of properties) {
+        console.log(`  ${prop.propertyId.padEnd(15)} ${prop.displayName.padEnd(30)} ${prop.timeZone}`);
+      }
+
+      console.log(chalk.gray(`\n  총 ${properties.length}개 속성`));
+      console.log(chalk.blue('\n💡 속성 선택 후 이벤트 조회:'));
+      console.log(chalk.gray('   npx ts-node src/cli.ts ga4 set-token -t <TOKEN> -p <PROPERTY_ID>'));
+      console.log(chalk.gray('   npx ts-node src/cli.ts ga4 events'));
+    } catch (error: any) {
+      console.error(chalk.red(`❌ 오류: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+ga4
+  .command('list')
+  .description('모든 계정과 속성을 계층 구조로 조회합니다')
+  .option('-t, --token <accessToken>', 'Access Token')
+  .action(async (options) => {
+    console.log(chalk.cyan('\n🌳 GA4 계정 및 속성 목록\n'));
+
+    const accessToken = options.token || getAccessToken();
+    if (!accessToken) {
+      console.error(chalk.red('❌ Access Token이 필요합니다.'));
+      process.exit(1);
+    }
+
+    try {
+      const adminClient = new GA4AdminClient(accessToken);
+      await adminClient.initialize();
+
+      const accountsWithProperties = await adminClient.listAccountsWithProperties();
+
+      if (accountsWithProperties.size === 0) {
+        console.log(chalk.yellow('조회 가능한 계정이 없습니다.'));
+        return;
+      }
+
+      let totalProperties = 0;
+
+      for (const [account, properties] of accountsWithProperties) {
+        console.log(chalk.yellow(`\n📁 ${account.displayName} (${account.accountId})`));
+
+        if (properties.length === 0) {
+          console.log(chalk.gray('   (속성 없음)'));
+        } else {
+          for (const prop of properties) {
+            console.log(chalk.white(`   └─ 🏠 ${prop.displayName}`));
+            console.log(chalk.gray(`      Property ID: ${prop.propertyId} | ${prop.timeZone}`));
+            totalProperties++;
+          }
+        }
+      }
+
+      console.log(chalk.gray(`\n총 ${accountsWithProperties.size}개 계정, ${totalProperties}개 속성`));
+      console.log(chalk.blue('\n💡 Property ID를 복사하여 이벤트를 조회하세요:'));
+      console.log(chalk.gray('   npx ts-node src/cli.ts ga4 events -p <PROPERTY_ID>'));
+    } catch (error: any) {
+      console.error(chalk.red(`❌ 오류: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+ga4
+  .command('test')
+  .description('GA4 연결을 테스트합니다')
+  .option('-p, --property <id>', 'GA4 Property ID')
+  .option('-t, --token <accessToken>', 'Access Token (또는 저장된 토큰 사용)')
+  .action(async (options) => {
+    console.log(chalk.cyan('\n🔍 GA4 연결 테스트\n'));
+
+    const propertyId = options.property || process.env.GA4_PROPERTY_ID;
+    if (!propertyId) {
+      console.error(chalk.red('❌ Property ID가 필요합니다.'));
+      console.error(chalk.gray('   -p 옵션 또는 GA4_PROPERTY_ID 환경변수를 설정하세요.'));
+      process.exit(1);
+    }
+
+    const accessToken = options.token || getAccessToken();
+    if (!accessToken) {
+      console.error(chalk.red('❌ Access Token이 필요합니다.'));
+      console.error(chalk.gray('   먼저 토큰을 설정하세요: npx ts-node src/cli.ts ga4 set-token -t <TOKEN>'));
+      process.exit(1);
+    }
+
+    try {
+      const client = createGA4ClientWithToken(propertyId, accessToken);
+      await client.testConnection();
+    } catch (error: any) {
+      console.error(chalk.red(`❌ 연결 실패: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+ga4
+  .command('events')
+  .description('수집된 이벤트 목록을 조회합니다')
+  .option('-p, --property <id>', 'GA4 Property ID')
+  .option('-t, --token <accessToken>', 'Access Token')
+  .option('--start <date>', '시작일 (YYYY-MM-DD 또는 30daysAgo)', '30daysAgo')
+  .option('--end <date>', '종료일 (YYYY-MM-DD 또는 today)', 'today')
+  .option('-l, --limit <n>', '최대 개수', '50')
+  .option('--ecommerce', 'E-commerce 이벤트만 조회')
+  .option('--custom', '커스텀 이벤트만 조회 (자동 수집 제외)')
+  .action(async (options) => {
+    console.log(chalk.cyan('\n📊 GA4 이벤트 조회\n'));
+
+    const propertyId = options.property || process.env.GA4_PROPERTY_ID;
+    if (!propertyId) {
+      console.error(chalk.red('❌ Property ID가 필요합니다.'));
+      process.exit(1);
+    }
+
+    const accessToken = options.token || getAccessToken();
+    if (!accessToken) {
+      console.error(chalk.red('❌ Access Token이 필요합니다.'));
+      console.error(chalk.gray('   먼저 토큰을 설정하세요: npx ts-node src/cli.ts ga4 set-token -t <TOKEN>'));
+      process.exit(1);
+    }
+
+    try {
+      const client = createGA4ClientWithToken(propertyId, accessToken);
+      await client.initialize();
+
+      const queryOptions = {
+        startDate: options.start,
+        endDate: options.end,
+        limit: parseInt(options.limit, 10),
+      };
+
+      let events;
+      if (options.ecommerce) {
+        console.log(chalk.gray('E-commerce 이벤트만 조회합니다.\n'));
+        events = await client.getEcommerceEvents(queryOptions);
+      } else if (options.custom) {
+        console.log(chalk.gray('커스텀 이벤트만 조회합니다 (자동 수집 제외).\n'));
+        events = await client.getCustomEvents(queryOptions);
+      } else {
+        events = await client.getEvents(queryOptions);
+      }
+
+      console.log(chalk.yellow(`  ${'이벤트명'.padEnd(35)} ${'이벤트 수'.padStart(12)} ${'사용자 수'.padStart(12)}`));
+      console.log(chalk.gray('  ' + '-'.repeat(60)));
+
+      for (const event of events) {
+        console.log(`  ${event.eventName.padEnd(35)} ${event.eventCount.toLocaleString().padStart(12)} ${event.totalUsers.toLocaleString().padStart(12)}`);
+      }
+
+      console.log(chalk.gray(`\n  총 ${events.length}개 이벤트`));
+    } catch (error: any) {
+      console.error(chalk.red(`❌ 오류: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+ga4
+  .command('page-events')
+  .description('페이지별 이벤트 수집 현황을 조회합니다')
+  .option('-p, --property <id>', 'GA4 Property ID')
+  .option('-t, --token <accessToken>', 'Access Token')
+  .option('--path <pagePath>', '특정 페이지 경로 필터 (예: /product/)')
+  .option('--start <date>', '시작일', '7daysAgo')
+  .option('--end <date>', '종료일', 'today')
+  .option('-l, --limit <n>', '최대 개수', '100')
+  .action(async (options) => {
+    console.log(chalk.cyan('\n📄 페이지별 이벤트 조회\n'));
+
+    const propertyId = options.property || process.env.GA4_PROPERTY_ID;
+    if (!propertyId) {
+      console.error(chalk.red('❌ Property ID가 필요합니다.'));
+      process.exit(1);
+    }
+
+    const accessToken = options.token || getAccessToken();
+    if (!accessToken) {
+      console.error(chalk.red('❌ Access Token이 필요합니다.'));
+      process.exit(1);
+    }
+
+    try {
+      const client = createGA4ClientWithToken(propertyId, accessToken);
+      await client.initialize();
+
+      const pageEvents = await client.getEventsByPage(options.path, {
+        startDate: options.start,
+        endDate: options.end,
+        limit: parseInt(options.limit, 10),
+      });
+
+      // 페이지별로 그룹화
+      const byPage = new Map<string, { eventName: string; eventCount: number }[]>();
+      for (const pe of pageEvents) {
+        if (!byPage.has(pe.pagePath)) {
+          byPage.set(pe.pagePath, []);
+        }
+        byPage.get(pe.pagePath)!.push({
+          eventName: pe.eventName,
+          eventCount: pe.eventCount,
+        });
+      }
+
+      for (const [pagePath, events] of byPage) {
+        console.log(chalk.yellow(`\n  📍 ${pagePath}`));
+        for (const event of events.slice(0, 10)) {  // 상위 10개만
+          console.log(chalk.gray(`     ${event.eventName}: ${event.eventCount.toLocaleString()}`));
+        }
+        if (events.length > 10) {
+          console.log(chalk.gray(`     ... 외 ${events.length - 10}개`));
+        }
+      }
+
+      console.log(chalk.gray(`\n  총 ${byPage.size}개 페이지`));
+    } catch (error: any) {
+      console.error(chalk.red(`❌ 오류: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+ga4
+  .command('realtime')
+  .description('실시간 이벤트를 조회합니다 (최근 30분)')
+  .option('-p, --property <id>', 'GA4 Property ID')
+  .option('-t, --token <accessToken>', 'Access Token')
+  .action(async (options) => {
+    console.log(chalk.cyan('\n⚡ GA4 실시간 이벤트\n'));
+
+    const propertyId = options.property || process.env.GA4_PROPERTY_ID;
+    if (!propertyId) {
+      console.error(chalk.red('❌ Property ID가 필요합니다.'));
+      process.exit(1);
+    }
+
+    const accessToken = options.token || getAccessToken();
+    if (!accessToken) {
+      console.error(chalk.red('❌ Access Token이 필요합니다.'));
+      process.exit(1);
+    }
+
+    try {
+      const client = createGA4ClientWithToken(propertyId, accessToken);
+      await client.initialize();
+
+      const events = await client.getRealtimeEvents();
+
+      console.log(chalk.yellow(`  ${'이벤트명'.padEnd(35)} ${'이벤트 수'.padStart(12)}`));
+      console.log(chalk.gray('  ' + '-'.repeat(48)));
+
+      for (const event of events) {
+        console.log(`  ${event.eventName.padEnd(35)} ${event.eventCount.toLocaleString().padStart(12)}`);
+      }
+
+      console.log(chalk.gray(`\n  최근 30분간 ${events.length}개 이벤트 유형 발생`));
+    } catch (error: any) {
+      console.error(chalk.red(`❌ 오류: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+ga4
+  .command('analyze-page')
+  .description('페이지별 이벤트 비중을 분석하고 노이즈를 판별합니다')
+  .requiredOption('--path <pagePath>', '분석할 페이지 경로 (예: /kr/ko/display/event_detail)')
+  .option('-p, --property <id>', 'GA4 Property ID')
+  .option('-t, --token <accessToken>', 'Access Token')
+  .option('--start <date>', '시작일', '30daysAgo')
+  .option('--end <date>', '종료일', 'today')
+  .action(async (options) => {
+    console.log(chalk.cyan('\n🔍 페이지 이벤트 비중 분석\n'));
+
+    const propertyId = options.property || process.env.GA4_PROPERTY_ID;
+    if (!propertyId) {
+      console.error(chalk.red('❌ Property ID가 필요합니다.'));
+      process.exit(1);
+    }
+
+    const accessToken = options.token || getAccessToken();
+    if (!accessToken) {
+      console.error(chalk.red('❌ Access Token이 필요합니다.'));
+      process.exit(1);
+    }
+
+    try {
+      const client = createGA4ClientWithToken(propertyId, accessToken);
+      await client.initialize();
+
+      console.log(chalk.gray(`페이지: ${options.path}`));
+      console.log(chalk.gray(`기간: ${options.start} ~ ${options.end}\n`));
+
+      const analysis = await client.analyzePageEvents(options.path, {
+        startDate: options.start,
+        endDate: options.end,
+      });
+
+      console.log(chalk.yellow(`  ${'이벤트명'.padEnd(30)} ${'수집건수'.padStart(14)} ${'비중(%)'.padStart(10)} ${'판정'.padStart(15)}`));
+      console.log(chalk.gray('  ' + '-'.repeat(75)));
+
+      for (const event of analysis.events) {
+        let status = chalk.green('✅ 유의미');
+        if (event.isNoise) {
+          status = chalk.red('⚠️  노이즈');
+        } else if (event.isLowSignificance) {
+          status = chalk.yellow('📊 낮은 유의성');
+        }
+
+        console.log(`  ${event.eventName.padEnd(30)} ${event.eventCount.toLocaleString().padStart(14)} ${event.percentString.padStart(10)} ${status}`);
+      }
+
+      console.log(chalk.gray('\n' + '-'.repeat(77)));
+      console.log(chalk.white(`  총 이벤트: ${analysis.totalEventCount.toLocaleString()}건`));
+      console.log(chalk.green(`  유의미한 이벤트: ${analysis.significantEvents.length}개`));
+      console.log(chalk.red(`  노이즈 이벤트: ${analysis.noiseEvents.length}개`));
+
+      if (analysis.noiseEvents.length > 0) {
+        console.log(chalk.gray(`\n  노이즈 목록: ${analysis.noiseEvents.join(', ')}`));
+      }
+
+      console.log(chalk.blue('\n💡 비중 0.01% 미만은 노이즈(오류/테스트)로 판단합니다.'));
+    } catch (error: any) {
+      console.error(chalk.red(`❌ 오류: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+ga4
+  .command('compare')
+  .description('에이전트 예측과 실제 GA4 데이터를 비교합니다')
+  .requiredOption('--path <pagePath>', '비교할 페이지 경로')
+  .requiredOption('--events <events>', '에이전트가 예측한 이벤트 목록 (쉼표 구분)')
+  .option('-p, --property <id>', 'GA4 Property ID')
+  .option('-t, --token <accessToken>', 'Access Token')
+  .option('--start <date>', '시작일', '30daysAgo')
+  .option('--end <date>', '종료일', 'today')
+  .action(async (options) => {
+    console.log(chalk.cyan('\n📊 에이전트 예측 vs GA4 실제 데이터 비교\n'));
+
+    const propertyId = options.property || process.env.GA4_PROPERTY_ID;
+    if (!propertyId) {
+      console.error(chalk.red('❌ Property ID가 필요합니다.'));
+      process.exit(1);
+    }
+
+    const accessToken = options.token || getAccessToken();
+    if (!accessToken) {
+      console.error(chalk.red('❌ Access Token이 필요합니다.'));
+      process.exit(1);
+    }
+
+    try {
+      const client = createGA4ClientWithToken(propertyId, accessToken);
+      await client.initialize();
+
+      const predictedEvents = options.events.split(',').map((e: string) => e.trim());
+
+      console.log(chalk.gray(`페이지: ${options.path}`));
+      console.log(chalk.gray(`예측 이벤트: ${predictedEvents.join(', ')}\n`));
+
+      const result = await client.compareWithPredictions(options.path, predictedEvents, {
+        startDate: options.start,
+        endDate: options.end,
+      });
+
+      // 정확히 예측
+      console.log(chalk.green(`✅ 정확히 예측한 이벤트 (${result.correctPredictions.length}개):`));
+      if (result.correctPredictions.length > 0) {
+        result.correctPredictions.forEach(e => console.log(chalk.gray(`   - ${e}`)));
+      } else {
+        console.log(chalk.gray('   (없음)'));
+      }
+
+      // 놓친 유의미 이벤트 (에이전트 개선 필요)
+      console.log(chalk.red(`\n❌ 놓친 유의미 이벤트 (${result.missedEvents.length}개) - 에이전트 개선 필요:`));
+      if (result.missedEvents.length > 0) {
+        result.missedEvents.forEach(e => {
+          const ev = result.analysis.events.find(a => a.eventName === e);
+          console.log(chalk.gray(`   - ${e} (${ev?.percentString || '?'})`));
+        });
+      } else {
+        console.log(chalk.gray('   (없음) - 모든 커스텀 이벤트 예측 성공!'));
+      }
+
+      // 잘못 예측
+      console.log(chalk.yellow(`\n⚠️  잘못 예측한 이벤트 (${result.falsePredictions.length}개):`));
+      if (result.falsePredictions.length > 0) {
+        result.falsePredictions.forEach(e => console.log(chalk.gray(`   - ${e} (수집 안됨)`)));
+      } else {
+        console.log(chalk.gray('   (없음)'));
+      }
+
+      // GA4 자동 수집 이벤트 (미예측이 정상)
+      if (result.missedAutoEvents.length > 0) {
+        console.log(chalk.blue(`\n📋 GA4 자동 수집 이벤트 (미예측 정상): ${result.missedAutoEvents.join(', ')}`));
+      }
+
+      // 노이즈 (미예측이 정상)
+      if (result.missedNoiseEvents.length > 0) {
+        console.log(chalk.gray(`\n📊 미예측 노이즈 (정상): ${result.missedNoiseEvents.join(', ')}`));
+      }
+
+      // 정확도 계산 (자동 수집 이벤트 제외)
+      const customSignificant = result.analysis.significantEvents.filter(e =>
+        !['first_visit', 'session_start', 'page_view', 'scroll', 'click', 'view_search_results',
+          'file_download', 'video_start', 'video_progress', 'video_complete', 'user_engagement', 'screen_view'].includes(e)
+      );
+      const correctCount = result.correctPredictions.filter(e => customSignificant.includes(e)).length;
+      const accuracy = customSignificant.length > 0 ? (correctCount / customSignificant.length * 100).toFixed(1) : 100;
+
+      console.log(chalk.cyan(`\n📈 커스텀 이벤트 예측 정확도: ${accuracy}% (${correctCount}/${customSignificant.length})`));
+      console.log(chalk.gray('   (GA4 자동 수집 이벤트는 정확도 계산에서 제외)'));
+    } catch (error: any) {
+      console.error(chalk.red(`❌ 오류: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+ga4
+  .command('setup')
+  .description('GA4 연동 설정 가이드를 표시합니다')
+  .action(() => {
+    console.log(chalk.cyan('\n📚 GA4 Data API 설정 가이드 (Access Token 방식)\n'));
+
+    console.log(chalk.yellow('1. Google OAuth Playground 접속'));
+    console.log(chalk.gray('   https://developers.google.com/oauthplayground/\n'));
+
+    console.log(chalk.yellow('2. Step 1: Select & authorize APIs'));
+    console.log(chalk.gray('   다음 2개 API 선택 (계정 조회 + 데이터 조회):'));
+    console.log(chalk.white('   ✓ Google Analytics Admin API v1'));
+    console.log(chalk.gray('     - https://www.googleapis.com/auth/analytics.readonly'));
+    console.log(chalk.white('   ✓ Google Analytics Data API v1'));
+    console.log(chalk.gray('     - https://www.googleapis.com/auth/analytics.readonly'));
+    console.log(chalk.gray('   → "Authorize APIs" 클릭\n'));
+
+    console.log(chalk.yellow('3. Google 계정으로 로그인'));
+    console.log(chalk.gray('   - GA4 속성에 접근 권한이 있는 계정으로 로그인'));
+    console.log(chalk.gray('   - 권한 허용\n'));
+
+    console.log(chalk.yellow('4. Step 2: Exchange authorization code for tokens'));
+    console.log(chalk.gray('   - "Exchange authorization code for tokens" 클릭'));
+    console.log(chalk.gray('   - Access token 복사\n'));
+
+    console.log(chalk.yellow('5. 토큰 설정'));
+    console.log(chalk.green('   npx ts-node src/cli.ts ga4 set-token -t <ACCESS_TOKEN>\n'));
+
+    console.log(chalk.yellow('6. 계정/속성 목록 조회'));
+    console.log(chalk.gray('   npx ts-node src/cli.ts ga4 list'));
+    console.log(chalk.gray('   → Property ID 확인\n'));
+
+    console.log(chalk.yellow('7. 이벤트 조회'));
+    console.log(chalk.gray('   npx ts-node src/cli.ts ga4 events -p <PROPERTY_ID>\n'));
+
+    console.log(chalk.blue('💡 토큰은 ./credentials/ga4_tokens.json에 저장됩니다.'));
+    console.log(chalk.yellow('⚠️  Access Token은 1시간 후 만료됩니다. 만료 시 다시 발급하세요.\n'));
+  });
+
+program.parse();

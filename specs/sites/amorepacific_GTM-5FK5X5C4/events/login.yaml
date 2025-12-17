@@ -1,0 +1,103 @@
+# login 이벤트 스펙
+# GA4 이벤트: 로그인 완료
+
+event: login
+ga4_event_name: login
+dataLayer_event: login_complete
+trigger_timing: "로그인을 완료했을 시 (유효성 검사 통과 후)"
+required: true
+required_condition: "로그인 기능이 있는 사이트만 해당"
+
+description: |
+  사용자가 로그인을 성공적으로 완료할 때 발생하는 이벤트입니다.
+  로그인 방법(method)과 관련 정보가 포함됩니다.
+
+parameters:
+  # dataLayer event
+  - ga4_param: event
+    dev_guide_var: event
+    gtm_variable: "{{_event}}"
+    data_type: string
+    description: "GTM 트리거 이벤트명"
+    example: "login_complete"
+    required: true
+
+  # 이벤트 카테고리
+  - ga4_param: event_category
+    dev_guide_var: event_category
+    gtm_variable: "{{DL - Event Category}}"
+    data_type: string
+    description: "이벤트 이름을 보충 설명하는 카테고리 값"
+    example: "login"
+    required: true
+
+  # 이벤트 액션
+  - ga4_param: event_action
+    dev_guide_var: event_action
+    gtm_variable: "{{DL - Event Action}}"
+    data_type: string
+    description: "이벤트 이름을 보충 설명하는 액션 값"
+    example: "login complete"
+    required: true
+
+  # 이벤트 라벨 (로그인 방법)
+  - ga4_param: event_label
+    dev_guide_var: event_label
+    gtm_variable: "{{DL - Event Label with customEvent}}"
+    data_type: string
+    description: "로그인 방법 (이벤트 이름을 보충 설명하는 라벨 값)"
+    example: "FACEBOOK"
+    required: true
+    validation: |
+      일반 로그인: NORMAL / EMAIL / ID
+      소셜 로그인: FACEBOOK / GOOGLE / APPLE / KAKAO / NAVER 등
+      통합회원의 경우 별도 정의 참고
+
+  # 이벤트 시간 (Amoremall 추가 파라미터)
+  - ga4_param: event_time_kst
+    dev_guide_var: "(GTM 내부 로직)"
+    gtm_variable: "{{JS - Event Time KST}}"
+    data_type: string
+    description: "이벤트 발생 시간 (KST)"
+    example: "2024-01-15T14:30:00+09:00"
+    required: false
+    note: "Amoremall 기준 추가 파라미터"
+
+dataLayer_example: |
+  window.dataLayer.push({
+    'event': 'login_complete',
+    'event_category': 'login',
+    'event_action': 'login - complete',
+    'event_label': 'FACEBOOK'
+  });
+
+login_method_values:
+  - value: "NORMAL"
+    description: "일반 로그인 (웹페이지)"
+  - value: "MOBILE"
+    description: "앱 로그인"
+  - value: "AUTO"
+    description: "자동 로그인 (앱)"
+  - value: "ORDER_NUMBER"
+    description: "비회원 주문번호 로그인"
+  - value: "FACEBOOK"
+    description: "페이스북 소셜 로그인"
+  - value: "GOOGLE"
+    description: "구글 소셜 로그인"
+  - value: "APPLE"
+    description: "애플 소셜 로그인"
+  - value: "KAKAO"
+    description: "카카오 소셜 로그인"
+  - value: "NAVER"
+    description: "네이버 소셜 로그인"
+
+related_events:
+  - event: sign_up
+    dataLayer_event: sign_up_complete
+    description: "회원가입 완료 시 발생"
+
+verification_notes:
+  - "event_label은 로그인 방법을 나타냄"
+  - "통합회원 기능인 경우 공통_통합회원 login/sign_up event_label 정의 참고"
+  - "유효성 검사 통과 후에만 이벤트 발생"
+  - "GTM parser를 통해 실제 파라미터 매핑 확인 필요"

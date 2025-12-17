@@ -1,0 +1,47 @@
+# scroll 이벤트 스펙
+# GA4 이벤트: 스크롤 추적
+
+event: scroll
+ga4_event_name: scroll
+dataLayer_event: "(GTM 자동 트리거)"
+trigger_timing: "페이지 스크롤 시 (특정 % 도달)"
+required: false  # GTM 자동 수집
+
+description: |
+  사용자가 페이지를 스크롤할 때 발생하는 이벤트입니다.
+  GTM의 Scroll Depth 트리거를 통해 자동으로 수집됩니다.
+  일반적으로 25%, 50%, 75%, 90% 등의 스크롤 깊이에서 발생합니다.
+
+parameters:
+  # 스크롤 깊이 (%)
+  - ga4_param: percent_scrolled
+    dev_guide_var: "(GTM 자동)"
+    gtm_variable: "{{Scroll Depth Threshold}}"
+    data_type: number
+    description: "스크롤 깊이 (백분율)"
+    example: 90
+    required: true
+    validation: "25 / 50 / 75 / 90 등"
+
+  # 스크롤 방향
+  - ga4_param: scroll_direction
+    dev_guide_var: "(GTM 자동)"
+    gtm_variable: "{{Scroll Direction}}"
+    data_type: string
+    description: "스크롤 방향"
+    example: "vertical"
+    required: false
+    validation: "vertical / horizontal"
+
+gtm_trigger_config:
+  trigger_type: "Scroll Depth"
+  vertical_scroll_depths: "25, 50, 75, 90"
+  horizontal_scroll_depths: ""
+  percentages: true
+  pixels: false
+
+verification_notes:
+  - "GTM의 Scroll Depth 트리거를 통해 자동 수집"
+  - "개발자가 별도로 dataLayer.push 할 필요 없음"
+  - "스크롤 깊이 임계값은 GTM 설정에 따라 다를 수 있음"
+  - "GTM parser를 통해 실제 파라미터 매핑 확인 필요"

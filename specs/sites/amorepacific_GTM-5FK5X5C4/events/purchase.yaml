@@ -1,0 +1,327 @@
+# purchase 이벤트 스펙
+# GA4 E-Commerce 이벤트: 구매 완료
+
+event: purchase
+ga4_event_name: purchase
+dataLayer_event: purchase
+trigger_timing: "상품 구매 완료 페이지 로드 시 (유효성 검사 통과 후)"
+required: true
+
+description: |
+  사용자가 상품 구매를 완료했을 때 발생하는 이벤트입니다.
+  주문 정보, 결제 정보, 할인 정보, 구매한 상품 목록이 포함됩니다.
+  가장 중요한 전자상거래 이벤트입니다.
+
+parameters:
+  # 통화 정보
+  - ga4_param: currency
+    dev_guide_var: AP_ECOMM_CURRENCY
+    gtm_variable: "{{JS - Currency}}"
+    data_type: string
+    description: "통화 코드 (ISO 3자리)"
+    example: "KRW"
+    required: true
+
+  # 거래 ID
+  - ga4_param: transaction_id
+    dev_guide_var: AP_PURCHASE_ORDERNUM
+    gtm_variable: "{{JS - Purchase Order Number}}"
+    data_type: string
+    description: "거래 ID (주문번호)"
+    example: "230913235089241"
+    required: true
+
+  # 주문 금액 (할인 반영)
+  - ga4_param: value
+    dev_guide_var: AP_PURCHASE_PRICE
+    gtm_variable: "{{JS - Purchase Price}}"
+    data_type: number
+    description: "주문 금액 (할인이 반영된 실제 주문 금액)"
+    example: 26000
+    required: true
+
+  # 배송비
+  - ga4_param: shipping
+    dev_guide_var: AP_PURCHASE_SHIPPING
+    gtm_variable: "{{JS - Purchase Shipping}}"
+    data_type: number
+    description: "배송비 (결제 시 결제된 실제 배송비)"
+    example: 2500
+    required: true
+
+  # 세금
+  - ga4_param: tax
+    dev_guide_var: AP_PURCHASE_TAX
+    gtm_variable: "{{JS - Purchase Tax}}"
+    data_type: number
+    description: "주문에 붙는 세금"
+    example: 0
+    required: true
+
+  # 장바구니 쿠폰
+  - ga4_param: coupon
+    dev_guide_var: AP_PURCHASE_COUPONNAME
+    gtm_variable: "{{JS - Purchase Coupon Name}}"
+    data_type: string
+    description: "장바구니 쿠폰 이름 (복수 시 | 구분)"
+    example: "[아모레퍼시픽] 빈티지 5%|11월 APP 5% 할인"
+    required: true
+    note: "적용된 쿠폰이 없는 경우 undefined"
+
+  # 장바구니 쿠폰 코드
+  - ga4_param: coupon_code
+    dev_guide_var: AP_PURCHASE_COUPONNO
+    gtm_variable: "{{JS - Purchase Coupon Code}}"
+    data_type: string
+    description: "장바구니 쿠폰 코드 (복수 시 | 구분)"
+    example: "1233|4453"
+    required: true
+    note: "적용된 쿠폰이 없는 경우 undefined"
+
+  # 결제 방법
+  - ga4_param: payment_type
+    dev_guide_var: AP_PURCHASE_TYPE
+    gtm_variable: "{{JS - Purchase Payment Type}}"
+    data_type: string
+    description: "주문 시 선택한 결제 방법"
+    example: "신용카드"
+    required: true
+    validation: "신용카드 / AMORE Pay / 간편결제 / 무통장입금 / 휴대폰 결제"
+
+  # 총 할인금액
+  - ga4_param: discount_total
+    dev_guide_var: AP_PURCHASE_DCTOTAL
+    gtm_variable: "{{JS - Purchase Discount Total}}"
+    data_type: number
+    description: "주문에 적용된 총 할인금액"
+    example: 1000
+    required: true
+
+  # 총 주문금액 (할인 미적용)
+  - ga4_param: original_price_total
+    dev_guide_var: AP_PURCHASE_PRDPRICE
+    gtm_variable: "{{JS - Purchase Original Price}}"
+    data_type: number
+    description: "총 주문금액 (할인을 적용하지 않은)"
+    example: 50000
+    required: true
+
+  # 쿠폰 할인금액
+  - ga4_param: coupon_discount
+    dev_guide_var: AP_PURCHASE_COUPON
+    gtm_variable: "{{JS - Purchase Coupon Discount}}"
+    data_type: number
+    description: "주문에 사용한 쿠폰할인금액"
+    example: 1000
+    required: true
+
+  # 기프트카드 사용금액 (Optional)
+  - ga4_param: giftcard_used
+    dev_guide_var: AP_PURCHASE_GIFTCARD
+    gtm_variable: "{{JS - Purchase Giftcard}}"
+    data_type: number
+    description: "주문에 사용한 기프트카드 사용금액"
+    example: 1000
+    required: false
+
+  # 뷰티포인트 사용금액 (Optional)
+  - ga4_param: point_used
+    dev_guide_var: AP_PURCHASE_POINT
+    gtm_variable: "{{JS - Purchase Point}}"
+    data_type: number
+    description: "주문에 사용한 뷰티포인트 할인금액"
+    example: 1000
+    required: false
+
+  # 모바일 상품권 사용금액 (Optional)
+  - ga4_param: mobile_voucher_used
+    dev_guide_var: AP_PURCHASE_ONLINEGIFT
+    gtm_variable: "{{JS - Purchase Online Gift}}"
+    data_type: number
+    description: "주문에 사용한 모바일 상품권 할인금액"
+    example: 1000
+    required: false
+
+  # 임직원 할인금액 (Optional)
+  - ga4_param: employee_discount
+    dev_guide_var: AP_PURCHASE_MEMBERSHIP
+    gtm_variable: "{{JS - Purchase Membership}}"
+    data_type: number
+    description: "주문에 사용한 임직원 할인금액"
+    example: 1000
+    required: false
+
+  # 뷰티포인트 적립금액 (Optional)
+  - ga4_param: beauty_point_earn
+    dev_guide_var: AP_PURCHASE_BEAUTYACC
+    gtm_variable: "{{JS - Purchase Beauty Acc}}"
+    data_type: number
+    description: "뷰티포인트 적립금액"
+    example: 1000
+    required: false
+
+  # 상품 배열 (items)
+  - ga4_param: items
+    dev_guide_var: AP_PURCHASE_PRDS
+    gtm_variable: "{{JS - Purchase DataLayer}}"
+    data_type: array
+    description: "구매한 상품 배열 (dataLayer variable에서 확인)"
+    required: true
+
+  # 개별 상품 파라미터 (items 배열 내)
+  - ga4_param: item_id
+    dev_guide_var: code
+    data_type: string
+    description: "상품 ID (SKU)"
+    example: "111070000513"
+    required: true
+
+  - ga4_param: item_name
+    dev_guide_var: name
+    data_type: string
+    description: "상품 이름"
+    example: "블랙 쿠션 SPF34/PA++ (본품 15g+리필 15g)"
+    required: true
+
+  - ga4_param: item_brand
+    dev_guide_var: brand
+    data_type: string
+    description: "상품 브랜드"
+    example: "헤라"
+    required: true
+
+  - ga4_param: item_category
+    dev_guide_var: cate
+    data_type: string
+    description: "상품 카테고리"
+    example: "메이크업"
+    required: true
+
+  - ga4_param: item_variant
+    dev_guide_var: variant
+    data_type: string
+    description: "상품 옵션"
+    example: "17C1"
+    required: true
+
+  - ga4_param: apg_brand_code
+    dev_guide_var: apg_brand_code
+    data_type: string
+    description: "APG 브랜드 코드"
+    example: "11107"
+    required: true
+
+  - ga4_param: quantity
+    dev_guide_var: quantity
+    data_type: number
+    description: "상품 수량"
+    example: 2
+    required: true
+
+  - ga4_param: price
+    dev_guide_var: price
+    data_type: number
+    description: "할인 적용 가격 (Unit Price)"
+    example: 59400
+    required: true
+    note: "결제 단계에서 적용되는 쿠폰, 적립금 등의 추가 할인은 미반영"
+
+  - ga4_param: discount
+    dev_guide_var: discount
+    data_type: number
+    description: "상품 할인 금액 (prdPrice - price)"
+    example: 10000
+    required: true
+    note: "쿠폰 할인 금액 미적용"
+
+  - ga4_param: prdprice
+    dev_guide_var: prdprice
+    data_type: number
+    description: "정가"
+    example: 59400
+    required: true
+
+  - ga4_param: promotion
+    dev_guide_var: promotion
+    data_type: string
+    description: "상품 쿠폰 이름 (복수 시 | 구분)"
+    example: "상품쿠폰이름1|상품쿠폰이름2"
+    required: true
+    note: "적용된 쿠폰이 없는 경우 undefined"
+
+  - ga4_param: promotion_code
+    dev_guide_var: promotion_code
+    data_type: string
+    description: "상품 쿠폰 코드 (복수 시 | 구분)"
+    example: "1233|4453"
+    required: true
+    note: "적용된 쿠폰이 없는 경우 undefined"
+
+  - ga4_param: beauty_point
+    dev_guide_var: beautyPoint
+    data_type: number
+    description: "단일 상품별 뷰티포인트 적립 금액"
+    example: 500
+    required: true
+
+dataLayer_example: |
+  var AP_ECOMM_CURRENCY = 'KRW';
+  var AP_PURCHASE_ORDERNUM = "230927115410740";
+  var AP_PURCHASE_COUPONNAME = "[아모레퍼시픽] 빈티지 5%|11월 APP 5% 할인";
+  var AP_PURCHASE_COUPONNO = "1233|4453";
+  var AP_PURCHASE_TYPE = "신용카드";
+  var AP_PURCHASE_PRICE = 223800;
+  var AP_PURCHASE_DCTOTAL = 47000;
+  var AP_PURCHASE_PRDPRICE = 270800;
+  var AP_PURCHASE_SHIPPING = 0;
+  var AP_PURCAHSE_TAX = 0;
+
+  // 사이트 상황에 따라 선택적으로 선언
+  var AP_PURCHASE_GIFTCARD = 1000;
+  var AP_PURCHASE_POINT = 5000;
+  var AP_PURCHASE_COUPON = 10000;
+  var AP_PURCHASE_ONLINEGIFT = 10000;
+  var AP_PURCHASE_MEMBERSHIP = 1000;
+  var AP_PURCHASE_BEAUTYACC = 1000;
+
+  var AP_PURCHASE_PRDS = [
+    {
+      "code": "111070000513",
+      "name": "블랙 쿠션 SPF34/PA++ (본품 15g+리필 15g)",
+      "quantity": 2,
+      "price": 59400,
+      "brand": "헤라",
+      "variant": "17C1",
+      "cate": "메이크업",
+      "promotion": undefined,
+      "discount": 10000,
+      "apg_brand_code": "11107",
+      "promotion_code": undefined,
+      "prdprice": 59400,
+      "beautyPoint": 500
+    },
+    {
+      "code": "111170101595",
+      "name": "탄력케어 에센셜 리추얼(탄력에센셜 3종) (150ml+125ml+50ml)",
+      "quantity": 1,
+      "price": 142000,
+      "brand": "설화수",
+      "variant": "13",
+      "cate": "스킨케어",
+      "promotion": undefined,
+      "discount": 10000,
+      "apg_brand_code": "11117",
+      "promotion_code": undefined,
+      "prdprice": 152000,
+      "beautyPoint": 500
+    }
+  ];
+
+  window.dataLayer.push({'event':'purchase'})
+
+verification_notes:
+  - "구매정보 및 구매제품과 관련된 변수가 모두 선언된 이후에 dataLayer.push 함수가 실행되어야 함"
+  - "제품정보(code, name, brand, cate, apg_brand_code)는 모든 전자상거래 단계에서 항상 동일해야 함"
+  - "가격은 모두 Unit Price(1개당 가격)로 전송"
+  - "상품 쿠폰(promotion)과 장바구니 쿠폰(coupon)은 별도로 관리"
+  - "GTM parser를 통해 실제 파라미터 매핑 확인 필요"

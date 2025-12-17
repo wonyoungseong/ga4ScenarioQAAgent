@@ -1,0 +1,136 @@
+# view_item 이벤트 스펙
+# GA4 E-Commerce 이벤트: 상품 상세 페이지 조회
+
+event: view_item
+ga4_event_name: view_item
+dataLayer_event: product
+trigger_timing: "상품 상세 페이지가 로드 되었을 시"
+required: true
+
+description: |
+  사용자가 상품 상세 페이지를 조회할 때 발생하는 이벤트입니다.
+  상품의 기본 정보(코드, 이름, 브랜드, 카테고리, 가격)와 재고 여부를 포함합니다.
+
+parameters:
+  # 통화 정보
+  - ga4_param: currency
+    dev_guide_var: AP_ECOMM_CURRENCY
+    gtm_variable: "{{JS - Currency}}"
+    data_type: string
+    description: "통화 코드 (ISO 3자리)"
+    example: "KRW"
+    required: true
+    validation: "ISO 4217 통화 코드 (KRW, USD, JPY 등)"
+
+  # 상품 배열 (items)
+  - ga4_param: items
+    dev_guide_var: "(AP_PRD_* 변수들로 구성)"
+    gtm_variable: "{{JS - View Item DataLayer}}"
+    data_type: array
+    description: "상품 정보 배열 (dataLayer variable에서 확인)"
+    required: true
+    note: "items 배열은 dataLayer에서 직접 구성됨"
+
+  # 상품 ID
+  - ga4_param: product_id
+    dev_guide_var: AP_PRD_CODE
+    gtm_variable: "{{JS - Product Id with View Item}}"
+    data_type: string
+    description: "상품 ID (SKU) - 아모레퍼시픽 공식 SKU"
+    example: "111070000513"
+    required: true
+    validation: "12자리 숫자 형식"
+
+  # 상품명
+  - ga4_param: item_name
+    dev_guide_var: AP_PRD_NAME
+    gtm_variable: "{{JS - Product Name}}"
+    data_type: string
+    description: "상품 이름"
+    example: "블랙 쿠션 SPF34/PA++ (본품 15g+리필 15g)"
+    required: true
+
+  # 브랜드
+  - ga4_param: item_brand
+    dev_guide_var: AP_PRD_BRAND
+    gtm_variable: "{{JS - Product Brand}}"
+    data_type: string
+    description: "상품 브랜드"
+    example: "헤라"
+    required: true
+
+  # 카테고리
+  - ga4_param: item_category
+    dev_guide_var: AP_PRD_CATEGORY
+    gtm_variable: "{{JS - Product Category}}"
+    data_type: string
+    description: "상품 카테고리 (depth는 '/'로 구분)"
+    example: "메이크업/페이스/쿠션"
+    required: true
+
+  # 브랜드 코드
+  - ga4_param: apg_brand_code
+    dev_guide_var: AP_PRD_APGBRCODE
+    gtm_variable: "{{JS - Product APG Brand Code}}"
+    data_type: string
+    description: "아모레퍼시픽 그룹 브랜드 코드 (SKU 앞 5자리)"
+    example: "11107"
+    required: true
+
+  # 재고 여부
+  - ga4_param: in_stock
+    dev_guide_var: AP_PRD_ISTOCK
+    gtm_variable: "{{JS - Product In Stock}}"
+    data_type: string
+    description: "재고 여부 (Y/N)"
+    example: "Y"
+    required: true
+    validation: "Y 또는 N"
+
+  # 가격 (할인 적용)
+  - ga4_param: price
+    dev_guide_var: AP_PRD_PRICE
+    gtm_variable: "{{JS - Product Price}}"
+    data_type: number
+    description: "할인이 적용된 최종 가격 (Unit Price)"
+    example: 49400
+    required: true
+    note: "구매 수량과 관계없이 항상 1개당 가격"
+
+  # 할인 금액
+  - ga4_param: discount
+    dev_guide_var: AP_PRD_DISCOUNT
+    gtm_variable: "{{JS - Product Discount}}"
+    data_type: number
+    description: "상품 할인 금액"
+    example: 10000
+    required: true
+
+  # 정가
+  - ga4_param: prdprice
+    dev_guide_var: AP_PRD_PRDPRICE
+    gtm_variable: "{{JS - Product Original Price}}"
+    data_type: number
+    description: "할인이 반영되지 않은 원래 상품 금액"
+    example: 59400
+    required: true
+
+dataLayer_example: |
+  var AP_ECOMM_CURRENCY = 'KRW';
+  var AP_PRD_CODE = "111070000513";
+  var AP_PRD_NAME = "블랙 쿠션 SPF34/PA++ (본품 15g+리필 15g)";
+  var AP_PRD_BRAND = "헤라";
+  var AP_PRD_CATEGORY = "메이크업/페이스/쿠션";
+  var AP_PRD_APGBRCODE = "11107";
+  var AP_PRD_ISTOCK = "Y";
+  var AP_PRD_PRICE = 49400;
+  var AP_PRD_DISCOUNT = 10000;
+  var AP_PRD_PRDPRICE = 59400;
+
+  window.dataLayer.push({'event':'product'})
+
+verification_notes:
+  - "items 파라미터는 dataLayer variable에서 확인 가능"
+  - "제품정보(code, name, brand, cate, apg_brand_code)는 모든 전자상거래 단계에서 항상 동일해야 함"
+  - "가격은 항상 Unit Price(1개당 가격)로 전송"
+  - "GTM parser를 통해 실제 파라미터 매핑 확인 필요"

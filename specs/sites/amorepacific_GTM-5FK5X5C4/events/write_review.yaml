@@ -1,0 +1,78 @@
+# write_review 이벤트 스펙
+# GA4 이벤트: 리뷰 작성 완료
+
+event: write_review
+ga4_event_name: write_review
+dataLayer_event: review
+trigger_timing: "리뷰 작성을 완료한 시점 (유효성 검사 통과 후)"
+required: true
+required_condition: "리뷰 작성 기능이 있는 사이트만 해당"
+
+description: |
+  사용자가 상품 리뷰를 작성 완료했을 때 발생하는 이벤트입니다.
+  리뷰 대상 상품 정보, 평점, 이미지 개수, 리뷰 내용이 포함됩니다.
+
+parameters:
+  # 리뷰 대상 상품명
+  - ga4_param: review_product
+    dev_guide_var: AP_REVIEW_PRD
+    gtm_variable: "{{JS - Review Product}}"
+    data_type: string
+    description: "리뷰한 제품명"
+    example: "탄력케어 에센셜 리추얼(탄력에센셜 3종)"
+    required: true
+
+  # 리뷰 대상 상품 코드
+  - ga4_param: review_product_code
+    dev_guide_var: AP_REVIEW_PRDCODE
+    gtm_variable: "{{JS - Review Product Code}}"
+    data_type: string
+    description: "리뷰한 제품 코드 (SKU)"
+    example: "110640000675"
+    required: true
+    note: "아모레퍼시픽 공식 SKU로 선언"
+
+  # 리뷰 평점
+  - ga4_param: review_rating
+    dev_guide_var: AP_REVIEW_RATING
+    gtm_variable: "{{JS - Review Rating}}"
+    data_type: number
+    description: "리뷰한 제품 점수"
+    example: 5
+    required: true
+    validation: "1~5 사이의 정수"
+
+  # 리뷰 이미지 개수
+  - ga4_param: review_picture_count
+    dev_guide_var: AP_REVIEW_PICTURE
+    gtm_variable: "{{JS - Review Picture Count}}"
+    data_type: number
+    description: "리뷰 때 업로드한 이미지 개수"
+    example: 1
+    required: true
+
+  # 리뷰 내용
+  - ga4_param: review_content
+    dev_guide_var: AP_REVIEW_CONTENT
+    gtm_variable: "{{JS - Review Content}}"
+    data_type: string
+    description: "리뷰 내용"
+    example: "좋은 제품 감사합니다"
+    required: true
+
+dataLayer_example: |
+  // 리뷰 작성과 관련된 변수가 모두 선언된 이후에 dataLayer.push 함수가 실행되어야 함
+
+  var AP_REVIEW_PRD = 'NEW 윤조에센스 (30ml/60ml/90ml)';
+  var AP_REVIEW_PRDCODE = '1111800001556';
+  var AP_REVIEW_RATING = '5';
+  var AP_REVIEW_PICTURE = '1';
+  var AP_REVIEW_CONTENT = '좋은 제품 감사합니다';
+
+  window.dataLayer.push({'event':'review'})
+
+verification_notes:
+  - "리뷰 작성과 관련된 변수가 모두 선언된 이후에 dataLayer.push 함수가 실행되어야 함"
+  - "유효성 검사 통과 후에만 이벤트 발생"
+  - "리뷰 작성 기능이 없는 사이트는 제외"
+  - "GTM parser를 통해 실제 파라미터 매핑 확인 필요"

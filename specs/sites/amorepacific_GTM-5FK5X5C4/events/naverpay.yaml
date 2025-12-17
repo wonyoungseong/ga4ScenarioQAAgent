@@ -1,0 +1,89 @@
+# naverpay 이벤트 스펙
+# GA4 이벤트: 네이버페이 관련 이벤트
+
+event: naverpay
+ga4_event_name: naverpay
+dataLayer_event: "naverpay_purchase_confirm / naverpay_*"
+trigger_timing: "네이버페이 결제 관련 시점"
+required: false
+
+description: |
+  네이버페이 결제 관련 이벤트입니다.
+  네이버페이로 결제를 진행하거나 완료할 때 발생합니다.
+
+parameters:
+  # 통화 정보
+  - ga4_param: currency
+    dev_guide_var: AP_ECOMM_CURRENCY
+    gtm_variable: "{{JS - Currency}}"
+    data_type: string
+    description: "통화 코드"
+    example: "KRW"
+    required: true
+
+  # 네이버페이 상품 옵션
+  - ga4_param: naverpay_options
+    dev_guide_var: AP_PRD_NAVERPAY_OPTIONS
+    gtm_variable: "{{JS - Naverpay Options}}"
+    data_type: array
+    description: "네이버페이 상품 옵션 배열"
+    required: true
+
+  # 총 수량
+  - ga4_param: total_quantity
+    dev_guide_var: "(GTM 계산)"
+    gtm_variable: "{{JS - Naverpay Total Quantity}}"
+    data_type: number
+    description: "네이버페이 상품 총 수량"
+    example: 2
+    required: true
+
+  # 총 금액
+  - ga4_param: total_price
+    dev_guide_var: "(GTM 계산)"
+    gtm_variable: "{{JS - Naverpay Total Price}}"
+    data_type: number
+    description: "네이버페이 상품 총 금액"
+    example: 118800
+    required: true
+
+  # 상품 가격
+  - ga4_param: product_price
+    dev_guide_var: AP_PRD_PRICE
+    gtm_variable: "{{JS - Product Price}}"
+    data_type: number
+    description: "상품 가격"
+    example: 59400
+    required: true
+
+naverpay_option_structure:
+  - field: option
+    description: "옵션명"
+    example: "13N1"
+
+  - field: quantity
+    description: "수량"
+    example: 2
+
+dataLayer_example: |
+  // 네이버페이 옵션 선언
+  var AP_PRD_NAVERPAY_OPTIONS = [
+    {
+      option: "13N1",
+      quantity: 2
+    }
+  ];
+
+  var AP_PRD_PRICE = 59400;
+
+  window.dataLayer.push({'event': 'naverpay_purchase_confirm'});
+
+related_events:
+  - event: purchase
+    description: "일반 구매 완료 이벤트"
+
+verification_notes:
+  - "네이버페이 결제 시에만 발생"
+  - "AP_PRD_NAVERPAY_OPTIONS 배열에서 옵션 정보 가져옴"
+  - "총 수량과 총 금액은 GTM에서 계산"
+  - "GTM parser를 통해 실제 파라미터 매핑 확인 필요"

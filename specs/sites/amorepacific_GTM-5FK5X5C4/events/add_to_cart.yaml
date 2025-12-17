@@ -1,0 +1,146 @@
+# add_to_cart 이벤트 스펙
+# GA4 E-Commerce 이벤트: 장바구니에 상품 추가
+
+event: add_to_cart
+ga4_event_name: add_to_cart
+dataLayer_event: addcart
+trigger_timing: "상품을 장바구니에 추가했을 시 (유효성 검사 통과 후)"
+required: true
+
+description: |
+  사용자가 상품을 장바구니에 추가할 때 발생하는 이벤트입니다.
+  상품의 수량(quantity)과 옵션(variant) 정보가 포함됩니다.
+
+parameters:
+  # 통화 정보
+  - ga4_param: currency
+    dev_guide_var: AP_ECOMM_CURRENCY
+    gtm_variable: "{{JS - Currency}}"
+    data_type: string
+    description: "통화 코드 (ISO 3자리)"
+    example: "KRW"
+    required: true
+
+  # 상품 배열 (items)
+  - ga4_param: items
+    dev_guide_var: AP_CART_ADDPRDS
+    gtm_variable: "{{JS - Add to Cart DataLayer}}"
+    data_type: array
+    description: "장바구니에 추가된 상품 배열 (dataLayer variable에서 확인)"
+    required: true
+
+  # 상품 ID
+  - ga4_param: item_id
+    dev_guide_var: code
+    gtm_variable: "{{DL - Add Cart Item Code}}"
+    data_type: string
+    description: "상품 ID (SKU)"
+    example: "111070000513"
+    required: true
+
+  # 상품명
+  - ga4_param: item_name
+    dev_guide_var: name
+    gtm_variable: "{{DL - Add Cart Item Name}}"
+    data_type: string
+    description: "상품 이름"
+    example: "블랙 쿠션 SPF34/PA++ (본품 15g+리필 15g)"
+    required: true
+
+  # 브랜드
+  - ga4_param: item_brand
+    dev_guide_var: brand
+    gtm_variable: "{{DL - Add Cart Item Brand}}"
+    data_type: string
+    description: "상품 브랜드"
+    example: "헤라"
+    required: true
+
+  # 카테고리
+  - ga4_param: item_category
+    dev_guide_var: cate
+    gtm_variable: "{{DL - Add Cart Item Category}}"
+    data_type: string
+    description: "상품 카테고리 (depth는 '/'로 구분)"
+    example: "메이크업"
+    required: true
+
+  # 상품 옵션
+  - ga4_param: item_variant
+    dev_guide_var: variant
+    gtm_variable: "{{DL - Add Cart Item Variant}}"
+    data_type: string
+    description: "상품에 대한 옵션 값"
+    example: "120ml"
+    required: true
+
+  # 브랜드 코드
+  - ga4_param: apg_brand_code
+    dev_guide_var: apg_brand_code
+    gtm_variable: "{{DL - Add Cart APG Brand Code}}"
+    data_type: string
+    description: "아모레퍼시픽 그룹 브랜드 코드"
+    example: "11107"
+    required: true
+
+  # 수량
+  - ga4_param: quantity
+    dev_guide_var: quantity
+    gtm_variable: "{{DL - Add Cart Quantity}}"
+    data_type: number
+    description: "상품 수량"
+    example: 2
+    required: true
+
+  # 가격
+  - ga4_param: price
+    dev_guide_var: price
+    gtm_variable: "{{DL - Add Cart Price}}"
+    data_type: number
+    description: "할인이 적용된 최종 가격 (Unit Price)"
+    example: 59400
+    required: true
+    note: "구매 수량과 관계없이 항상 1개당 가격"
+
+  # 할인 금액
+  - ga4_param: discount
+    dev_guide_var: discount
+    gtm_variable: "{{DL - Add Cart Discount}}"
+    data_type: number
+    description: "상품 할인 금액 (Unit Price)"
+    example: 10000
+    required: true
+
+  # 정가
+  - ga4_param: prdprice
+    dev_guide_var: prdprice
+    gtm_variable: "{{DL - Add Cart Original Price}}"
+    data_type: number
+    description: "할인이 반영되지 않은 상품 금액 (Unit Price)"
+    example: 59400
+    required: true
+
+dataLayer_example: |
+  var AP_ECOMM_CURRENCY = 'KRW';
+
+  var AP_CART_ADDPRDS = [{
+    "code": "111070000513",
+    "name": "블랙 쿠션 SPF34/PA++ (본품 15g+리필 15g)",
+    "brand": "헤라",
+    "cate": "메이크업",
+    "variant": "120ml",
+    "apg_brand_code": "11107",
+    "quantity": 2,
+    "price": 59400,      // unit price
+    "discount": 10000,   // unit price
+    "prdprice": 59400    // unit price
+  }];
+
+  window.dataLayer.push({'event':'addcart'})
+
+verification_notes:
+  - "제품정보(code, name, brand, cate, apg_brand_code)는 모든 전자상거래 단계에서 항상 동일해야 함"
+  - "price, discount, prdprice는 모두 Unit Price(1개당 가격)로 전송"
+  - "quantity는 장바구니에 추가하는 수량"
+  - "variant는 상품 옵션(용량, 색상 등)"
+  - "GTM parser를 통해 실제 파라미터 매핑 확인 필요"

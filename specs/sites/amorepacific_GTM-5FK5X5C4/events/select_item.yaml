@@ -1,0 +1,147 @@
+# select_item 이벤트 스펙
+# GA4 E-Commerce 이벤트: 상품 리스트에서 상품 클릭
+
+event: select_item
+ga4_event_name: select_item
+dataLayer_event: select_item
+trigger_timing: "상품 리스트에서 상품이 클릭되었을 시 (상품 카테고리 페이지 / 검색 결과)"
+required: true
+
+description: |
+  사용자가 상품 리스트에서 특정 상품을 클릭할 때 발생하는 이벤트입니다.
+  상품의 위치(index)와 노출 영역(item_list_name) 정보가 포함됩니다.
+
+parameters:
+  # 통화 정보
+  - ga4_param: currency
+    dev_guide_var: AP_ECOMM_CURRENCY
+    gtm_variable: "{{JS - Currency}}"
+    data_type: string
+    description: "통화 코드 (ISO 3자리)"
+    example: "KRW"
+    required: true
+
+  # 상품 배열 (items)
+  - ga4_param: items
+    dev_guide_var: "(prdInfo 객체로 전달)"
+    gtm_variable: "{{JS - Select Item DataLayer}}"
+    data_type: array
+    description: "상품 정보 배열 (dataLayer variable에서 확인)"
+    required: true
+
+  # 상품 ID
+  - ga4_param: item_id
+    dev_guide_var: code
+    gtm_variable: "{{DL - Select Item Code}}"
+    data_type: string
+    description: "상품 ID (SKU)"
+    example: "111070000513"
+    required: true
+
+  # 상품명
+  - ga4_param: item_name
+    dev_guide_var: name
+    gtm_variable: "{{DL - Select Item Name}}"
+    data_type: string
+    description: "상품 이름"
+    example: "블랙 쿠션 SPF34/PA++ (본품 15g+리필 15g)"
+    required: true
+
+  # 브랜드
+  - ga4_param: item_brand
+    dev_guide_var: brand
+    gtm_variable: "{{DL - Select Item Brand}}"
+    data_type: string
+    description: "상품 브랜드"
+    example: "헤라"
+    required: true
+
+  # 카테고리
+  - ga4_param: item_category
+    dev_guide_var: cate
+    gtm_variable: "{{DL - Select Item Category}}"
+    data_type: string
+    description: "상품 카테고리 (depth는 '/'로 구분)"
+    example: "메이크업/페이스/쿠션"
+    required: true
+
+  # 브랜드 코드
+  - ga4_param: apg_brand_code
+    dev_guide_var: apg_brand_code
+    gtm_variable: "{{DL - Select Item APG Brand Code}}"
+    data_type: string
+    description: "아모레퍼시픽 그룹 브랜드 코드"
+    example: "11107"
+    required: true
+
+  # 노출 위치 (인덱스)
+  - ga4_param: index
+    dev_guide_var: index
+    gtm_variable: "{{DL - Select Item Index}}"
+    data_type: number
+    description: "item_list 영역 내에서 상품이 클릭된 위치"
+    example: 1
+    required: true
+    validation: "1부터 시작하는 정수"
+
+  # 노출 영역
+  - ga4_param: item_list_name
+    dev_guide_var: item_list_name
+    gtm_variable: "{{DL - Select Item List Name}}"
+    data_type: string
+    description: "상품이 클릭된 영역 (대문자)"
+    example: "SEARCH"
+    required: true
+    validation: "SEARCH / PRODUCT_LIST / MAIN 등"
+
+  # 가격
+  - ga4_param: price
+    dev_guide_var: price
+    gtm_variable: "{{DL - Select Item Price}}"
+    data_type: number
+    description: "할인이 적용된 최종 가격 (Unit Price)"
+    example: 49400
+    required: true
+
+  # 할인 금액
+  - ga4_param: discount
+    dev_guide_var: discount
+    gtm_variable: "{{DL - Select Item Discount}}"
+    data_type: number
+    description: "상품 할인 금액"
+    example: 10000
+    required: true
+
+  # 정가
+  - ga4_param: prdprice
+    dev_guide_var: prdprice
+    gtm_variable: "{{DL - Select Item Original Price}}"
+    data_type: number
+    description: "할인이 반영되지 않은 상품 금액"
+    example: 59400
+    required: true
+
+dataLayer_example: |
+  var AP_ECOMM_CURRENCY = 'KRW';
+
+  window.dataLayer.push({
+    'event':'select_item',
+    'prdInfo': {
+      'code': '111070000513',
+      'name': '블랙 쿠션 SPF34/PA++ (본품 15g+리필 15g)',
+      'brand': '헤라',
+      'cate': '메이크업/페이스/쿠션',
+      'apg_brand_code': '11107',
+      'index': '1',
+      'item_list_name': 'SEARCH',
+      'price': 49400,
+      'discount': 10000,
+      'prdprice': 59400
+    }
+  });
+
+verification_notes:
+  - "제품정보(code, name, brand, cate, apg_brand_code)는 모든 전자상거래 단계에서 항상 동일해야 함"
+  - "index는 리스트 내 상품 위치를 나타냄 (1부터 시작)"
+  - "item_list_name은 상품이 노출된 영역을 대문자로 전송"
+  - "GTM parser를 통해 실제 파라미터 매핑 확인 필요"

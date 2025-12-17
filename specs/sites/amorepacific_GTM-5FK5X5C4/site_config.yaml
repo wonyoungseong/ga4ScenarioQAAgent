@@ -1,0 +1,75 @@
+# 사이트 설정 파일
+# 이 파일은 해당 사이트의 기본 정보와 참조 문서를 정의합니다.
+
+site_info:
+  name: "아모레퍼시픽"
+  code: "amorepacific"
+  brands:
+    - AMOREPACIFIC
+    - INNISFREE
+    - ETUDE
+    - LANEIGE
+    - SULWHASOO
+    - HERA
+    - PRIMERA
+    - IOPE
+    - MAMONDE
+    - ESPOIR
+    - AESTURA
+    - MISE EN SCENE
+    - HAPPY BATH
+    - ILLIYOON
+    - RIRE
+
+# 참조 문서
+reference_documents:
+  dev_guide: "[EC]+WEB+개발+가이드_GTM코드추가(Shopify)1.1.pdf"
+  gtm_container: "GTM-5FK5X5C4_workspace112.json"
+
+# 변수 네이밍 규칙
+variable_naming:
+  prefix: "AP_"
+  patterns:
+    page_info: "AP_DATA_*"
+    product_info: "AP_PRD_*"
+    purchase_info: "AP_PURCHASE_*"
+    search_info: "AP_SEARCH_*"
+    cart_info: "AP_CART_*"
+    order_info: "AP_ORDER_*"
+    ecommerce: "AP_ECOMM_*"
+    promo: "AP_PROMO_*"
+
+# dataLayer 이벤트 매핑
+dataLayer_events:
+  page_view: "ap_page_view"
+  view_item: "product"
+  select_item: "select_item"
+  view_item_list: "ap_search"
+  add_to_cart: "addcart"
+  remove_from_cart: "removeCart"
+  begin_checkout:
+    - "cart"
+    - "purchasecartbtn"
+    - "purchaseprdbtn"
+    - "order"
+    - "orderbtn"
+  purchase: "purchase"
+  login: "login_complete"
+  sign_up: "sign_up_complete"
+  withdrawal: "withdrawal_complete"
+  write_review: "review"
+
+# GTM Variable 네이밍 패턴
+gtm_variable_patterns:
+  javascript: "{{JS - *}}"
+  dataLayer: "{{DL - *}}"
+  lookup_table: "{{LT - *}}"
+
+# 특이사항
+notes:
+  - "AP_ prefix는 아모레퍼시픽 고유 네이밍 규칙"
+  - "begin_checkout은 여러 dataLayer 이벤트로 트리거됨"
+  - "프로모션 이벤트는 HTML 속성(ap-data-promotion 등) 기반"
+  - "클릭 추적은 ap-click-* HTML 속성 사용"
+
+created_at: "2024-12-15"

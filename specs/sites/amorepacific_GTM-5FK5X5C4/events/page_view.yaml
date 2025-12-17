@@ -1,0 +1,218 @@
+# page_view 이벤트 스펙
+# GA4 이벤트: 페이지 조회
+
+event: page_view
+ga4_event_name: page_view
+dataLayer_event: ap_page_view
+trigger_timing: "모든 페이지의 HTML 파싱이 완료되어 DOM 구조가 완성되는 시점"
+required: true
+
+description: |
+  모든 페이지에서 DOM 로드 완료 시 발생하는 기본 페이지뷰 이벤트입니다.
+  공통 변수(페이지 정보, 사용자 정보)가 모두 선언된 후에 실행되어야 합니다.
+
+parameters:
+  # 페이지 정보 변수 (공통)
+  - ga4_param: site_name
+    dev_guide_var: AP_DATA_SITENAME
+    gtm_variable: "{{JS - Site Name}}"
+    data_type: string
+    description: "사이트 이름 (영문 대문자)"
+    example: "INNISFREE"
+    required: true
+
+  - ga4_param: country
+    dev_guide_var: AP_DATA_COUNTRY
+    gtm_variable: "{{JS - Country}}"
+    data_type: string
+    description: "국가코드 (ISO 3166-1 Alpha-2)"
+    example: "KR"
+    required: true
+
+  - ga4_param: language
+    dev_guide_var: AP_DATA_LANG
+    gtm_variable: "{{JS - Language}}"
+    data_type: string
+    description: "페이지 언어 (ISO 639-1 대문자)"
+    example: "KO"
+    required: true
+
+  - ga4_param: environment
+    dev_guide_var: AP_DATA_ENV
+    gtm_variable: "{{JS - Environment}}"
+    data_type: string
+    description: "개발환경"
+    example: "PRD"
+    required: true
+    validation: "PRD / DEV / STG / LOCAL / QA"
+
+  - ga4_param: channel
+    dev_guide_var: AP_DATA_CHANNEL
+    gtm_variable: "{{JS - Channel}}"
+    data_type: string
+    description: "접속 채널"
+    example: "MOBILE"
+    required: true
+    validation: "PC / MOBILE / APP"
+
+  - ga4_param: breadcrumb
+    dev_guide_var: AP_DATA_BREAD
+    gtm_variable: "{{JS - Breadcrumb}}"
+    data_type: string
+    description: "Breadcrumb (구분자: ' > ')"
+    example: "베스트 > 스킨케어 > 상품상세"
+    required: false
+    note: "내부적으로 정의된 값이 없는 경우 undefined"
+
+  - ga4_param: page_type
+    dev_guide_var: AP_DATA_PAGETYPE
+    gtm_variable: "{{JS - Page Type}}"
+    data_type: string
+    description: "페이지 타입"
+    example: "PRODUCT_DETAIL"
+    required: true
+    validation: |
+      MAIN / BRAND_MAIN / PRODUCT_DETAIL / PRODUCT_LIST /
+      SEARCH_RESULT / CART / ORDER / MY /
+      EVENT_LIST / EVENT_DETAIL / LIVE_LIST / LIVE_DETAIL / OTHERS
+
+  - ga4_param: promo_id
+    dev_guide_var: AP_PROMO_ID
+    gtm_variable: "{{JS - Promo ID}}"
+    data_type: string
+    description: "조회한 이벤트/프로모션 ID"
+    example: "3224"
+    required: true
+    note: "이벤트/프로모션 페이지가 아닌 경우 undefined"
+
+  - ga4_param: promo_name
+    dev_guide_var: AP_PROMO_NAME
+    gtm_variable: "{{JS - Promo Name}}"
+    data_type: string
+    description: "조회한 이벤트/프로모션명"
+    example: "속탄력부터 끌어올리는 NEW 콜라겐 탄력장벽 크림"
+    required: true
+    note: "이벤트/프로모션 페이지가 아닌 경우 undefined"
+
+  - ga4_param: is_login
+    dev_guide_var: AP_DATA_ISLOGIN
+    gtm_variable: "{{JS - Is Login}}"
+    data_type: string
+    description: "로그인 여부"
+    example: "Y"
+    required: true
+    validation: "Y / N"
+
+  # 사용자 정보 변수 (로그인 시에만)
+  - ga4_param: gcid
+    dev_guide_var: AP_DATA_GCID
+    gtm_variable: "{{JS - GCID}}"
+    data_type: string
+    description: "회원 아이디 SHA512 해싱값"
+    example: "aa47d4859ab17bb60a0a28f3a8f2d0..."
+    required: true
+    note: "비로그인 시 undefined"
+
+  - ga4_param: cid
+    dev_guide_var: AP_DATA_CID
+    gtm_variable: "{{JS - CID}}"
+    data_type: string
+    description: "통합 회원번호 SHA512 해싱값"
+    example: "f9b7cc17e2c394141a85dfdd332efb..."
+    required: true
+    note: "통합회원이 아닌 경우 undefined"
+
+  - ga4_param: is_member
+    dev_guide_var: AP_DATA_ISMEMBER
+    gtm_variable: "{{JS - Is Member}}"
+    data_type: string
+    description: "통합회원 여부"
+    example: "Y"
+    required: true
+    validation: "Y / N"
+
+  - ga4_param: gender
+    dev_guide_var: AP_DATA_CG
+    gtm_variable: "{{JS - Gender}}"
+    data_type: string
+    description: "성별"
+    example: "F"
+    required: true
+    validation: "F / M"
+
+  - ga4_param: birth_year
+    dev_guide_var: AP_DATA_CD
+    gtm_variable: "{{JS - Birth Year}}"
+    data_type: string
+    description: "생년 (YYYY)"
+    example: "1980"
+    required: true
+
+  - ga4_param: login_type
+    dev_guide_var: AP_DATA_LOGINTYPE
+    gtm_variable: "{{JS - Login Type}}"
+    data_type: string
+    description: "로그인 방법"
+    example: "NORMAL"
+    required: true
+    validation: "NORMAL / MOBILE / ORDER_NUMBER / AUTO"
+
+  - ga4_param: customer_tier
+    dev_guide_var: AP_DATA_CT
+    gtm_variable: "{{JS - Customer Tier}}"
+    data_type: string
+    description: "사이트 내부 회원등급"
+    example: "WELCOME"
+    required: true
+    note: "사이트 내부 회원등급이 없는 경우 undefined"
+
+  - ga4_param: beauty_tier
+    dev_guide_var: AP_DATA_BEAUTYCT
+    gtm_variable: "{{JS - Beauty Tier}}"
+    data_type: string
+    description: "뷰티포인트 회원 등급"
+    example: "FAMILY"
+    required: true
+    validation: "FAMILY / GREEN / SILVER / GOLD / PLATINUM"
+
+  - ga4_param: is_employee
+    dev_guide_var: AP_DATA_ISEMPLOYEE
+    gtm_variable: "{{JS - Is Employee}}"
+    data_type: string
+    description: "임직원 여부"
+    example: "N"
+    required: true
+    validation: "Y / N"
+
+dataLayer_example: |
+  // 페이지 정보 변수 선언
+  var AP_DATA_SITENAME = "INNISFREE";
+  var AP_DATA_COUNTRY = "KR";
+  var AP_DATA_LANG = "KO";
+  var AP_DATA_ENV = "PRD";
+  var AP_DATA_CHANNEL = "MOBILE";
+  var AP_DATA_BREAD = "베스트 > 스킨케어 > 상품상세";
+  var AP_DATA_PAGETYPE = "PRODUCT_DETAIL";
+  var AP_PROMO_ID = undefined;
+  var AP_PROMO_NAME = undefined;
+  var AP_DATA_ISLOGIN = "Y";
+
+  // 사용자 정보 변수 선언 (로그인 시)
+  var AP_DATA_GCID = "aa47d4859ab17bb60a0a28f3a8f2...";
+  var AP_DATA_CID = "f9b7cc17e2c394141a85dfdd332ef...";
+  var AP_DATA_ISMEMBER = "Y";
+  var AP_DATA_CG = "F";
+  var AP_DATA_CD = "1980";
+  var AP_DATA_LOGINTYPE = "NORMAL";
+  var AP_DATA_CT = "WELCOME";
+  var AP_DATA_BEAUTYCT = "FAMILY";
+  var AP_DATA_ISEMPLOYEE = "N";
+
+  // 공통 변수가 모두 선언된 이후에 실행
+  window.dataLayer.push({'event':'ap_page_view'})
+
+verification_notes:
+  - "공통 변수가 모두 선언된 이후에 dataLayer.push 함수가 실행되어야 함"
+  - "모든 페이지에서 발생하는 기본 이벤트"
+  - "사용자 정보 변수는 로그인 상태에서만 값 할당"
+  - "GTM parser를 통해 실제 파라미터 매핑 확인 필요"

@@ -1,0 +1,174 @@
+# begin_checkout 이벤트 스펙
+# GA4 E-Commerce 이벤트: 결제 프로세스 시작
+
+event: begin_checkout
+ga4_event_name: begin_checkout
+dataLayer_event: "cart / purchasecartbtn / purchaseprdbtn / order / orderbtn"
+trigger_timing: |
+  1-1) 장바구니 페이지가 로드 되었을 시 (event: cart)
+  1-2) 장바구니 슬라이드가 열렸을 시 (event: cart)
+  2) 장바구니 페이지 내 구매 버튼 클릭 시 (event: purchasecartbtn)
+  3) 상품상세 페이지 내 구매 버튼 클릭 시 (event: purchaseprdbtn)
+  4) 주문서 페이지 로드 시 (event: order)
+  5) 주문서 페이지 내 결제하기 버튼 클릭 시 (event: orderbtn)
+required: true
+
+description: |
+  사용자가 결제 프로세스를 시작할 때 발생하는 이벤트입니다.
+  장바구니 조회, 구매 버튼 클릭, 주문서 페이지 조회 등 여러 시점에서 발생합니다.
+  발생 시점에 따라 다른 dataLayer event를 push합니다.
+
+parameters:
+  # 통화 정보
+  - ga4_param: currency
+    dev_guide_var: AP_ECOMM_CURRENCY
+    gtm_variable: "{{JS - Currency}}"
+    data_type: string
+    description: "통화 코드 (ISO 3자리)"
+    example: "KRW"
+    required: true
+
+  # 상품 배열 (items)
+  - ga4_param: items
+    dev_guide_var: "AP_CART_PRDS / AP_ORDER_PRDS"
+    gtm_variable: "{{JS - Begin Checkout DataLayer}}"
+    data_type: array
+    description: "장바구니/주문서에 포함된 상품 배열 (dataLayer variable에서 확인)"
+    required: true
+
+  # 체크아웃 단계 (Amoremall 추가 파라미터)
+  - ga4_param: checkout_seq
+    dev_guide_var: "(GTM 내부 로직)"
+    gtm_variable: "{{LT - Checkout Sequence}}"
+    data_type: number
+    description: "체크아웃 단계 번호"
+    example: 1
+    required: false
+    note: "Amoremall 기준 추가 파라미터"
+
+  # 개별 상품 파라미터 (items 배열 내)
+  - ga4_param: item_id
+    dev_guide_var: code
+    gtm_variable: "(items 배열 내)"
+    data_type: string
+    description: "상품 ID (SKU)"
+    example: "111070000513"
+    required: true
+
+  - ga4_param: item_name
+    dev_guide_var: name
+    gtm_variable: "(items 배열 내)"
+    data_type: string
+    description: "상품 이름"
+    example: "블랙 쿠션 SPF34/PA++ (본품 15g+리필 15g)"
+    required: true
+
+  - ga4_param: item_brand
+    dev_guide_var: brand
+    gtm_variable: "(items 배열 내)"
+    data_type: string
+    description: "상품 브랜드"
+    example: "헤라"
+    required: true
+
+  - ga4_param: item_category
+    dev_guide_var: cate
+    gtm_variable: "(items 배열 내)"
+    data_type: string
+    description: "상품 카테고리 (depth는 '/'로 구분)"
+    example: "메이크업"
+    required: true
+
+  - ga4_param: item_variant
+    dev_guide_var: variant
+    gtm_variable: "(items 배열 내)"
+    data_type: string
+    description: "상품 옵션"
+    example: "17C1"
+    required: true
+
+  - ga4_param: apg_brand_code
+    dev_guide_var: apg_brand_code
+    gtm_variable: "(items 배열 내)"
+    data_type: string
+    description: "아모레퍼시픽 그룹 브랜드 코드"
+    example: "11107"
+    required: true
+
+  - ga4_param: quantity
+    dev_guide_var: quantity
+    gtm_variable: "(items 배열 내)"
+    data_type: number
+    description: "상품 수량"
+    example: 2
+    required: true
+
+  - ga4_param: price
+    dev_guide_var: price
+    gtm_variable: "(items 배열 내)"
+    data_type: number
+    description: "할인이 적용된 최종 가격 (Unit Price)"
+    example: 59400
+    required: true
+
+  - ga4_param: discount
+    dev_guide_var: discount
+    gtm_variable: "(items 배열 내)"
+    data_type: number
+    description: "상품 할인 금액"
+    example: 10000
+    required: true
+
+  - ga4_param: prdprice
+    dev_guide_var: prdprice
+    gtm_variable: "(items 배열 내)"
+    data_type: number
+    description: "할인이 반영되지 않은 상품 금액"
+    example: 59400
+    required: true
+
+dataLayer_example:
+  cart_page_load: |
+    // 1-1 & 1-2) 장바구니 페이지가 로드 되었을 시
+    var AP_ECOMM_CURRENCY = 'KRW';
+
+    var AP_CART_PRDS = [
+      {
+        "code": "111070000513",
+        "name": "블랙 쿠션 SPF34/PA++ (본품 15g+리필 15g)",
+        "brand": "헤라",
+        "cate": "메이크업",
+        "variant": "17C1",
+        "apg_brand_code": "11107",
+        "quantity": 2,
+        "price": 59400,      // unit price
+        "discount": 10000,   // unit price
+        "prdprice": 59400    // unit price
+      }
+    ];
+
+    window.dataLayer.push({'event':'cart'})
+
+  cart_purchase_button: |
+    // 2) 장바구니 페이지 내 구매 버튼 클릭 시
+    window.dataLayer.push({'event':'purchasecartbtn'})
+
+  product_detail_purchase: |
+    // 3) 상품상세 페이지 내 구매 버튼 클릭 시
+    window.dataLayer.push({'event':'purchaseprdbtn', 'quantity': 2})
+
+  order_page_load: |
+    // 4) 주문서 페이지 로드 시
+    var AP_ORDER_PRDS = [...];
+    window.dataLayer.push({'event':'order'})
+
+  order_payment_button: |
+    // 5) 주문서 페이지 내 결제하기 버튼 클릭 시
+    window.dataLayer.push({'event':'orderbtn'})
+
+verification_notes:
+  - "주문정보 및 주문제품과 관련된 변수가 모두 선언된 이후에 dataLayer.push 함수가 실행되어야 함"
+  - "제품정보(code, name, brand, cate, apg_brand_code)는 모든 전자상거래 단계에서 항상 동일해야 함"
+  - "전송시점에 따라 다른 event 값을 push"
+  - "price, discount, prdprice는 모두 Unit Price(1개당 가격)로 전송"
+  - "GTM parser를 통해 실제 파라미터 매핑 확인 필요"

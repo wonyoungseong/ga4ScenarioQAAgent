@@ -1,0 +1,81 @@
+# live 이벤트 스펙
+# GA4 이벤트: 라이브 방송 관련 이벤트
+
+event: live
+ga4_event_name: live
+dataLayer_event: "(라이브 관련 이벤트)"
+trigger_timing: "라이브 방송 관련 시점 (시작, 종료, 상호작용 등)"
+required: false
+
+description: |
+  라이브 방송 관련 이벤트입니다.
+  라이브 방송 시청, 상호작용, 상품 클릭 등을 추적합니다.
+  라이브 콘텐츠가 있는 사이트에서만 해당됩니다.
+
+parameters:
+  # 라이브 ID
+  - ga4_param: live_id
+    dev_guide_var: live_id
+    gtm_variable: "{{DL - Live ID}}"
+    data_type: string
+    description: "라이브 방송 ID"
+    example: "live_2024_001"
+    required: true
+
+  # 라이브 제목
+  - ga4_param: live_title
+    dev_guide_var: live_title
+    gtm_variable: "{{DL - Live Title}}"
+    data_type: string
+    description: "라이브 방송 제목"
+    example: "신상품 런칭 라이브"
+    required: true
+
+  # 라이브 액션
+  - ga4_param: live_action
+    dev_guide_var: live_action
+    gtm_variable: "{{DL - Live Action}}"
+    data_type: string
+    description: "라이브 관련 액션"
+    example: "view"
+    required: true
+    validation: "view / click / purchase / chat / like"
+
+  # 라이브 브랜드
+  - ga4_param: live_brand
+    dev_guide_var: live_brand
+    gtm_variable: "{{DL - Live Brand}}"
+    data_type: string
+    description: "라이브 방송 브랜드"
+    example: "설화수"
+    required: false
+
+  # 상품 ID (클릭/구매 시)
+  - ga4_param: product_id
+    dev_guide_var: product_id
+    gtm_variable: "{{DL - Live Product ID}}"
+    data_type: string
+    description: "라이브에서 클릭/구매한 상품 ID"
+    example: "111070000513"
+    required: false
+
+live_actions:
+  - action: "view"
+    description: "라이브 방송 시청 시작"
+
+  - action: "click"
+    description: "라이브 내 상품 클릭"
+
+  - action: "purchase"
+    description: "라이브에서 상품 구매"
+
+  - action: "chat"
+    description: "라이브 채팅 참여"
+
+  - action: "like"
+    description: "라이브 좋아요"
+
+verification_notes:
+  - "라이브 콘텐츠가 있는 사이트에서만 해당"
+  - "AP_DATA_PAGETYPE에서 LIVE_LIST, LIVE_DETAIL로 구분 가능"
+  - "GTM parser를 통해 실제 파라미터 매핑 확인 필요"
