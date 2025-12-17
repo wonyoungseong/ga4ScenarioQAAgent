@@ -889,11 +889,14 @@ export class IntegratedEventAnalyzer {
    * @param url 분석할 URL
    * @param screenshotPath 스크린샷 파일 경로
    * @param playwrightPage (선택) Playwright Page 객체 - CSS Selector 검증에 사용
+   * @param options (선택) 분석 옵션
+   * @param options.skipVision Vision AI UI 검증을 건너뜁니다 (토큰 절약, 병렬 처리용)
    */
   async analyzeEventsForPage(
     url: string,
     screenshotPath: string,
-    playwrightPage?: Page
+    playwrightPage?: Page,
+    options?: { skipVision?: boolean }
   ): Promise<IntegratedEventAnalysisResult> {
     // 0. 개발가이드 로드
     await this.loadDevGuide();
@@ -1064,16 +1067,29 @@ export class IntegratedEventAnalyzer {
     const eventsToVerify = eventsAfterDevGuideFilter.map(e => e.eventName);
 
     // 7. Vision AI로 UI 검증 (개발가이드 + CSS Selector 정보 포함)
-    let uiVerificationResults = await this.verifyUIWithVision(
-      screenshotPath,
-      eventsToVerify,
-      pageType,
-      eventSelectorMap,
-      selectorVerifications
-    );
+    let uiVerificationResults: UIVerificationResult[];
 
-    // 7-1. 연관 이벤트 로직 적용 (login ↔ sign_up 같은 진입점 공유)
-    uiVerificationResults = this.applyLinkedEventLogic(uiVerificationResults, eventsToVerify);
+    if (options?.skipVision) {
+      // Vision AI 스킵 - 모든 이벤트를 UI 있음으로 처리 (GTM/개발가이드 필터링만 적용)
+      // 병렬 처리에서 별도 Vision 배치 프로세서를 사용할 때 사용
+      uiVerificationResults = eventsToVerify.map(eventName => ({
+        eventName,
+        hasUI: true,
+        reason: '[skipVision] GTM/개발가이드 필터링만 적용됨 - Vision AI 검증 생략',
+        confidence: 'medium' as const,
+      }));
+    } else {
+      uiVerificationResults = await this.verifyUIWithVision(
+        screenshotPath,
+        eventsToVerify,
+        pageType,
+        eventSelectorMap,
+        selectorVerifications
+      );
+
+      // 7-1. 연관 이벤트 로직 적용 (login ↔ sign_up 같은 진입점 공유)
+      uiVerificationResults = this.applyLinkedEventLogic(uiVerificationResults, eventsToVerify);
+    }
 
     // 8. 결과 분류
     const actuallyCanFire: ActualEventResult[] = [];

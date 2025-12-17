@@ -231,6 +231,7 @@ export class ParallelContentGroupAnalyzer {
 
   /**
    * Vision AI 없이 GTM 기반 분석만 수행
+   * skipVision 옵션으로 Vision AI 호출을 건너뛰어 토큰 절약
    */
   private async runNonVisionAnalysis(
     url: string,
@@ -241,14 +242,17 @@ export class ParallelContentGroupAnalyzer {
     if (!this.analyzer) return [];
 
     try {
-      // 전체 분석 결과에서 이벤트 목록만 추출
-      const result = await this.analyzer.analyzeEventsForPage(url, screenshotPath, page);
+      // skipVision: true로 Vision AI 호출을 건너뜀 (토큰 절약)
+      // Vision AI 검증은 visionBatchProcessor에서 별도로 수행
+      const result = await this.analyzer.analyzeEventsForPage(
+        url,
+        screenshotPath,
+        page,
+        { skipVision: true }
+      );
 
-      // actuallyCanFire + noUIEvents에서 이벤트명 추출
-      const allEvents = [
-        ...result.actuallyCanFire.map(e => e.eventName),
-        ...result.noUIEvents.map(e => e.eventName),
-      ];
+      // actuallyCanFire에서 이벤트명 추출 (skipVision 시 모든 이벤트가 여기에 포함됨)
+      const allEvents = result.actuallyCanFire.map(e => e.eventName);
 
       return [...new Set(allEvents)];
     } catch (error: any) {
