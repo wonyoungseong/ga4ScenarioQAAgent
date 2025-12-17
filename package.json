@@ -10,7 +10,9 @@
     "build": "tsc",
     "start": "node dist/cli.js",
     "dev": "ts-node src/cli.ts",
-    "test": "ts-node src/cli.ts analyze --url https://betc.co.kr/ecommerceMpaIndex.html --event SELECT_ITEM"
+    "test": "ts-node src/cli.ts analyze --url https://betc.co.kr/ecommerceMpaIndex.html --event SELECT_ITEM",
+    "test:content-groups": "ts-node src/test-content-groups.ts",
+    "test:content-groups:parallel": "ts-node src/test-content-groups-parallel.ts"
   },
   "dependencies": {
     "@google-analytics/admin": "^9.0.1",
