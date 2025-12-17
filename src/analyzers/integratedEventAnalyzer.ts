@@ -101,27 +101,30 @@ const EVENT_FILTERING_CONFIG = {
       allowedUrlPatterns: null,
     },
     // view_item_list - 개발가이드에 따르면 SEARCH 타입에서만 발생
+    // GA4 실제 데이터: SEARCH_RESULT에서만 발생, BRAND_PRODUCT_LIST에서는 미발생
     'view_item_list': {
       condition: 'page_type_restriction',
-      description: '검색 결과 페이지에서만 발생 (개발가이드 정의)',
+      description: '검색 결과 페이지에서만 발생 (GA4 실제 데이터 기준)',
       requiredElement: null,
-      allowedPageTypes: ['SEARCH_RESULT'],
+      allowedPageTypes: ['SEARCH_RESULT', 'SEARCH'],
       allowedUrlPatterns: [/\/search/i, /searchKeyword=/i, /query=/i],
     },
-    // brand_store - 아모레몰 EDGE CASE: /brand 페이지에서만 발생
+    // brand_store - 아모레몰 EDGE CASE: 개별 브랜드 홈페이지에서만 발생
+    // GA4 데이터 기준: /display/brand/detail 페이지에서는 발생하지 않음
+    // /primera, /sulwhasoo 등 개별 브랜드 전용 홈페이지에서만 발생
     'brand_store': {
       condition: 'url_pattern_restriction',
-      description: '브랜드 페이지에서만 발생 (아모레몰 EDGE CASE)',
+      description: '개별 브랜드 홈페이지에서만 발생 (아모레몰 EDGE CASE - /display/brand/detail 제외)',
       requiredElement: null,
-      allowedPageTypes: ['BRAND_MAIN'],
-      allowedUrlPatterns: [/\/display\/brand\/detail/i, /\/brand\//i, /\/brand$/i, /\/primera$/i, /\/sulwhasoo$/i, /\/hera$/i],
+      allowedPageTypes: [],  // BRAND_MAIN 제외 - GA4 데이터에서 발생하지 않음
+      allowedUrlPatterns: [/\/primera$/i, /\/sulwhasoo$/i, /\/hera$/i, /\/iope$/i, /\/laneige$/i],  // 개별 브랜드 홈만
     },
     // brand_product_click - 브랜드 페이지에서만 발생
     'brand_product_click': {
       condition: 'url_pattern_restriction',
       description: '브랜드 페이지에서만 발생 (아모레몰 EDGE CASE)',
       requiredElement: null,
-      allowedPageTypes: ['BRAND_MAIN'],
+      allowedPageTypes: ['BRAND_MAIN', 'BRAND_PRODUCT_LIST', 'BRAND_EVENT_LIST', 'BRAND_CUSTOM_ETC'],
       allowedUrlPatterns: [/\/display\/brand\/detail/i, /\/brand\//i, /\/brand$/i, /\/primera$/i, /\/sulwhasoo$/i, /\/hera$/i],
     },
     // sign_up - 아모레몰 EDGE CASE: 회원가입 완료 페이지에서만 발생
@@ -135,36 +138,40 @@ const EVENT_FILTERING_CONFIG = {
     },
     // scroll - GTM에서 특정 Content Group에서만 발생하도록 설정됨
     // contentGroup == 'MAIN' || contentGroup == 'PRODUCT_DETAIL' || contentGroup == 'EVENT_DETAIL'
-    // BRAND_MAIN 추가: GA4 실제 데이터에서 BRAND_MAIN에서 scroll이 58.5%로 최상위 이벤트
+    // BRAND_MAIN, BRAND_PRODUCT_LIST 추가: GA4 실제 데이터에서 브랜드 페이지에서 scroll 발생
     'scroll': {
       condition: 'page_type_restriction',
-      description: 'MAIN, PRODUCT_DETAIL, EVENT_DETAIL, BRAND_MAIN 페이지에서만 발생 (GTM 트리거 조건)',
+      description: 'MAIN, PRODUCT_DETAIL, EVENT_DETAIL, BRAND_MAIN, BRAND_PRODUCT_LIST 페이지에서만 발생 (GTM 트리거 조건)',
       requiredElement: null,
-      allowedPageTypes: ['MAIN', 'PRODUCT_DETAIL', 'EVENT_DETAIL', 'BRAND_MAIN'],
+      allowedPageTypes: ['MAIN', 'PRODUCT_DETAIL', 'EVENT_DETAIL', 'BRAND_MAIN', 'BRAND_PRODUCT_LIST'],
       allowedUrlPatterns: null,
     },
     // login - 아모레몰 EDGE CASE: 로그인 완료 시점에 발생
     // 로그인 버튼 클릭이 아닌, 로그인 완료 후 리다이렉트된 페이지에서 발생
-    // GA4 실제 데이터 기준: MAIN, HISTORY(OTHERS)에서 발생, PRODUCT_LIST/MY에서는 미발생
+    // GA4 실제 데이터 기준: MAIN, HISTORY에서 발생, PRODUCT_LIST/MY에서는 미발생
     'login': {
       condition: 'page_type_restriction',
       description: '로그인 완료 후 리다이렉트되는 주요 페이지에서만 발생 (아모레몰 EDGE CASE)',
       requiredElement: null,
-      allowedPageTypes: ['MAIN', 'PRODUCT_DETAIL', 'CART', 'OTHERS'],
+      allowedPageTypes: ['MAIN', 'PRODUCT_DETAIL', 'CART', 'HISTORY', 'OTHERS'],
       allowedUrlPatterns: null,
     },
     // view_search_results - 검색 결과 페이지에서만 발생
+    // 개발가이드 정의: SEARCH_RESULT 페이지에서만 발생
+    // ⚠️ BEAUTYFEED에서 3.24% 수집되나 개발가이드 기준 SEARCH_RESULT만 허용
     'view_search_results': {
       condition: 'page_type_restriction',
-      description: '검색 결과 페이지에서만 발생 (GA4 표준)',
+      description: '검색 결과 페이지에서만 발생 (개발가이드 정의)',
       requiredElement: null,
-      allowedPageTypes: ['SEARCH_RESULT'],
+      allowedPageTypes: ['SEARCH_RESULT', 'SEARCH'],
       allowedUrlPatterns: [/\/search/i, /searchKeyword=/i, /query=/i],
     },
-    // view_promotion - 메인 페이지 Key Visual에서만 발생
+    // view_promotion - 메인 페이지 Key Visual 영역에서만 발생
+    // 개발가이드 정의: MAIN 페이지에서만 발생
+    // ⚠️ 다른 페이지에서 수집되는 것은 SPA 오류 (MY: 5.73%, HISTORY: 5.36% 등은 노이즈)
     'view_promotion': {
       condition: 'page_type_restriction',
-      description: '메인 페이지 Key Visual 영역에서만 발생 (GTM 조건)',
+      description: '메인 페이지 Key Visual 영역에서만 발생 (개발가이드 정의, 다른 페이지는 SPA 오류)',
       requiredElement: null,
       allowedPageTypes: ['MAIN'],
       allowedUrlPatterns: null,
@@ -194,13 +201,13 @@ const EVENT_FILTERING_CONFIG = {
       allowedUrlPatterns: [/\/order\/complete/i, /\/orderComplete/i, /\/order\/success/i, /ordNo=/i],
     },
     // click_with_duration - 특정 페이지에서만 발생 (사용자 체류 시간 측정)
-    // GA4 실제 데이터: MAIN, PRODUCT_DETAIL, EVENT_DETAIL, BRAND_MAIN, HISTORY에서 발생
-    // PRODUCT_LIST, MY, SEARCH_RESULT에서는 미발생
+    // GA4 실제 데이터: MAIN, PRODUCT_DETAIL, EVENT_DETAIL, BRAND_MAIN, BRAND_PRODUCT_LIST, BRAND_CUSTOM_ETC, HISTORY에서 발생
+    // 주의: BRAND_EVENT_LIST에서는 미발생
     'click_with_duration': {
       condition: 'page_type_restriction',
-      description: 'MAIN, PRODUCT_DETAIL, EVENT_DETAIL, BRAND_MAIN, HISTORY에서만 발생 (GTM 조건)',
+      description: '컨텐츠 페이지에서 발생 (GTM 조건, GA4 데이터 기준)',
       requiredElement: null,
-      allowedPageTypes: ['MAIN', 'PRODUCT_DETAIL', 'EVENT_DETAIL', 'BRAND_MAIN', 'OTHERS'],
+      allowedPageTypes: ['MAIN', 'PRODUCT_DETAIL', 'EVENT_DETAIL', 'BRAND_MAIN', 'BRAND_PRODUCT_LIST', 'BRAND_CUSTOM_ETC', 'HISTORY'],
       allowedUrlPatterns: null,
     },
     // custom_event - 특정 페이지의 커스텀 인터랙션에서만 발생
@@ -209,7 +216,27 @@ const EVENT_FILTERING_CONFIG = {
       condition: 'page_type_restriction',
       description: 'MY, HISTORY 페이지에서만 발생 (커스텀 인터랙션 추적)',
       requiredElement: null,
-      allowedPageTypes: ['MY', 'OTHERS'],
+      allowedPageTypes: ['MY', 'HISTORY', 'OTHERS'],
+      allowedUrlPatterns: null,
+    },
+    // select_promotion - 프로모션 배너 클릭 시 발생
+    // 개발가이드 정의: MAIN 페이지에서만 발생 (Key Visual 클릭)
+    // ⚠️ 다른 페이지에서 수집되는 것은 SPA 오류 (MY: 0.28%, HISTORY: 0.50% 등은 노이즈)
+    'select_promotion': {
+      condition: 'page_type_restriction',
+      description: '메인 페이지 프로모션 배너 클릭 시 발생 (개발가이드 정의)',
+      requiredElement: null,
+      allowedPageTypes: ['MAIN'],
+      allowedUrlPatterns: null,
+    },
+    // qualified_visit - 일정 시간 이상 체류한 방문자 추적
+    // 대부분의 페이지에서 발생하는 체류 시간 기반 이벤트
+    // 제한 없음 (모든 페이지에서 발생 가능)
+    'qualified_visit': {
+      condition: 'no_restriction',
+      description: '일정 시간 이상 체류한 방문자 추적 (모든 페이지)',
+      requiredElement: null,
+      allowedPageTypes: null,
       allowedUrlPatterns: null,
     },
   } as Record<string, {
@@ -265,7 +292,8 @@ const AMOREMALL_BRAND_PAGE_EDGE_CASES = {
   /** 브랜드 페이지 판별 조건 */
   isBrandPage: (pageType: PageType, url?: string): boolean => {
     // AP_DATA_PAGETYPE 기반 판별
-    if (pageType === 'BRAND_MAIN' || (pageType as string) === 'BRAND_PRODUCT_LIST') {
+    const brandPageTypes = ['BRAND_MAIN', 'BRAND_PRODUCT_LIST', 'BRAND_EVENT_LIST', 'BRAND_CUSTOM_ETC', 'BRAND_LIST'];
+    if (brandPageTypes.includes(pageType)) {
       return true;
     }
     // URL 패턴 기반 판별
@@ -1012,7 +1040,59 @@ export class IntegratedEventAnalyzer {
       }
     }
 
-    // 3-2. 이벤트 필터링 (GTM 변수 패턴, 조건부 이벤트, GA4 피드백)
+    // 3-2. [Video Event] YouTube iframe 감지 시 video_start, video_progress 자동 추가
+    // GA4 Enhanced Measurement는 YouTube 비디오만 자동 추적 (일반 video 태그, Shoppable Live 등은 미지원)
+    if (playwrightPage) {
+      const videoDetection = await this.detectVideoElements(playwrightPage);
+
+      // YouTube가 있을 때만 video_start/video_progress 추가
+      if (videoDetection.youtubeCount > 0) {
+        console.log(`   🎬 YouTube 감지됨: ${videoDetection.youtubeCount}개`);
+
+        // video_start가 목록에 없으면 추가
+        const hasVideoStart = eventsAfterDevGuideFilter.some(e => e.eventName === 'video_start');
+        if (!hasVideoStart) {
+          eventsAfterDevGuideFilter.push({
+            eventName: 'video_start',
+            canFire: true,
+            summary: `[YouTube 감지] ${videoDetection.youtubeCount}개 - 비디오 재생 시 발생`,
+            triggerResults: [{
+              canFire: true,
+              triggerName: 'YouTube Video Trigger (Auto-detected)',
+              triggerType: 'YOUTUBE_VIDEO',
+              reason: `YouTube iframe ${videoDetection.youtubeCount}개 감지`,
+              filterResults: [],
+              hasVariableDeclarationIssue: false,
+            }],
+            blockedByVariableDeclaration: false,
+          });
+        }
+
+        // video_progress가 목록에 없으면 추가
+        const hasVideoProgress = eventsAfterDevGuideFilter.some(e => e.eventName === 'video_progress');
+        if (!hasVideoProgress) {
+          eventsAfterDevGuideFilter.push({
+            eventName: 'video_progress',
+            canFire: true,
+            summary: `[YouTube 감지] ${videoDetection.youtubeCount}개 - 비디오 10%, 25%, 50%, 75% 진행 시 발생`,
+            triggerResults: [{
+              canFire: true,
+              triggerName: 'YouTube Video Trigger (Auto-detected)',
+              triggerType: 'YOUTUBE_VIDEO',
+              reason: `YouTube iframe ${videoDetection.youtubeCount}개 감지`,
+              filterResults: [],
+              hasVariableDeclarationIssue: false,
+            }],
+            blockedByVariableDeclaration: false,
+          });
+        }
+      } else if (videoDetection.hasVideo) {
+        // YouTube 외 비디오는 로그만 출력 (video_start/video_progress 미추가)
+        console.log(`   📹 비YouTube 비디오 감지됨: ${videoDetection.details} (GA4 video 이벤트 미지원)`);
+      }
+    }
+
+    // 3-3. 이벤트 필터링 (GTM 변수 패턴, 조건부 이벤트, GA4 피드백)
     const pagePath = new URL(url).pathname;
     const filterResult = await this.filterEvents(eventsAfterDevGuideFilter, playwrightPage, pagePath, pageType, url);
     eventsAfterDevGuideFilter = filterResult.filtered as typeof eventsAfterDevGuideFilter;
@@ -1022,6 +1102,28 @@ export class IntegratedEventAnalyzer {
 
     if (filterResult.blocked.length > 0) {
       console.log(`   🔍 필터링됨: ${filterResult.blocked.map(e => e.eventName).join(', ')}`);
+    }
+
+    // 3-4. [아모레몰 Edge Case] qualified_visit 모든 페이지에서 자동 추가
+    // 조건: 10초 체류 OR 스크롤 50%/90% OR 영상 50% 시청 시 발생
+    // 모든 페이지에서 발생 가능하므로 필터링 후 강제 추가
+    const hasQualifiedVisit = eventsAfterDevGuideFilter.some(e => e.eventName === 'qualified_visit');
+    if (!hasQualifiedVisit) {
+      eventsAfterDevGuideFilter.push({
+        eventName: 'qualified_visit',
+        canFire: true,
+        summary: '[아모레몰 Edge Case] 품질 방문 추적 - 10초 체류, 스크롤 50%/90%, 또는 영상 50% 시청 시 발생',
+        triggerResults: [{
+          canFire: true,
+          triggerName: 'Qualified Visit Trigger (Edge Case)',
+          triggerType: 'CUSTOM_EVENT',
+          reason: '모든 페이지에서 조건 충족 시 발생',
+          filterResults: [],
+          hasVariableDeclarationIssue: false,
+        }],
+        blockedByVariableDeclaration: false,
+      });
+      console.log(`   📌 [Edge Case] qualified_visit 자동 추가 (모든 페이지 발생 가능)`);
     }
 
     // 4. CSS Selector 검증 (Playwright Page가 제공된 경우)
@@ -1208,9 +1310,10 @@ export class IntegratedEventAnalyzer {
       }
     }
 
-    // 8-2. [아모레몰 Edge Case] BRAND_MAIN 페이지에서 brand_product_click 처리
+    // 8-2. [아모레몰 Edge Case] 브랜드 페이지에서 brand_product_click 처리
     // Vision AI가 상품을 못 찾아도 브랜드 페이지에서는 brand_product_click 발생 가능
-    if (pageType === 'BRAND_MAIN') {
+    const brandPageTypes = ['BRAND_MAIN', 'BRAND_PRODUCT_LIST', 'BRAND_EVENT_LIST', 'BRAND_CUSTOM_ETC'];
+    if (brandPageTypes.includes(pageType)) {
       const brandClickInNoUI = noUIEvents.find(e => e.eventName === 'brand_product_click');
       if (brandClickInNoUI) {
         // noUIEvents에서 제거하고 actuallyCanFire로 이동
@@ -1227,7 +1330,7 @@ export class IntegratedEventAnalyzer {
             confidence: 'medium',
           },
         });
-        console.log(`   ✅ [Edge Case] BRAND_MAIN 페이지 → brand_product_click 발생 가능`);
+        console.log(`   ✅ [Edge Case] ${pageType} 페이지 → brand_product_click 발생 가능`);
       }
     }
 
@@ -1752,6 +1855,86 @@ export class IntegratedEventAnalyzer {
     }
 
     return undefined;
+  }
+
+  /**
+   * 페이지에서 YouTube iframe 또는 video 요소를 감지합니다.
+   * 감지 시 video_start, video_progress 이벤트가 발생 가능함을 의미합니다.
+   */
+  private async detectVideoElements(page: Page): Promise<{
+    hasVideo: boolean;
+    details: string;
+    youtubeCount: number;
+    videoTagCount: number;
+    vimeoCount: number;
+  }> {
+    try {
+      // YouTube iframe 감지 (다양한 형식 지원)
+      const youtubeSelectors = [
+        'iframe[src*="youtube.com"]',
+        'iframe[src*="youtube-nocookie.com"]',
+        'iframe[src*="youtu.be"]',
+        'iframe[data-src*="youtube"]',
+        '[class*="youtube-player"]',
+        '[id*="youtube"]',
+      ];
+
+      let youtubeCount = 0;
+      for (const selector of youtubeSelectors) {
+        try {
+          const elements = await page.$$(selector);
+          youtubeCount += elements.length;
+        } catch {}
+      }
+
+      // HTML5 video 태그 감지
+      const videoTags = await page.$$('video');
+      const videoTagCount = videoTags.length;
+
+      // Vimeo iframe 감지
+      const vimeoElements = await page.$$('iframe[src*="vimeo.com"]');
+      const vimeoCount = vimeoElements.length;
+
+      // 기타 비디오 플레이어 감지 (class/id 기반)
+      const otherVideoSelectors = [
+        '[class*="video-player"]',
+        '[class*="video-container"]',
+        '[class*="player-wrapper"]',
+        '[data-video]',
+      ];
+
+      let otherVideoCount = 0;
+      for (const selector of otherVideoSelectors) {
+        try {
+          const elements = await page.$$(selector);
+          otherVideoCount += elements.length;
+        } catch {}
+      }
+
+      const hasVideo = youtubeCount > 0 || videoTagCount > 0 || vimeoCount > 0 || otherVideoCount > 0;
+
+      const details: string[] = [];
+      if (youtubeCount > 0) details.push(`YouTube ${youtubeCount}개`);
+      if (videoTagCount > 0) details.push(`Video 태그 ${videoTagCount}개`);
+      if (vimeoCount > 0) details.push(`Vimeo ${vimeoCount}개`);
+      if (otherVideoCount > 0) details.push(`기타 비디오 플레이어 ${otherVideoCount}개`);
+
+      return {
+        hasVideo,
+        details: details.length > 0 ? details.join(', ') : '비디오 없음',
+        youtubeCount,
+        videoTagCount,
+        vimeoCount,
+      };
+    } catch (error) {
+      return {
+        hasVideo: false,
+        details: '비디오 감지 실패',
+        youtubeCount: 0,
+        videoTagCount: 0,
+        vimeoCount: 0,
+      };
+    }
   }
 
   /**

@@ -13,6 +13,7 @@ import { ScreenshotManager } from './screenshotManager';
 import { GTMConfigLoader, createDefaultGTMConfigLoader, PreloadedGTMConfig } from '../config/gtmConfigLoader';
 import { IntegratedEventAnalyzer } from '../analyzers/integratedEventAnalyzer';
 import { PageType, detectPageTypeComprehensive, ComprehensivePageTypeResult } from '../types/pageContext';
+import { edgeCaseLoader, EdgeCase } from '../config/siteEdgeCases';
 
 export interface ContentGroupConfig {
   contentGroup: string;
@@ -31,6 +32,7 @@ export interface ParallelAnalysisResult {
   correct: string[];
   missed: string[];
   wrong: string[];
+  sessionOnceSkipped: string[];  // SESSION_ONCE 이벤트 (정확도 계산 제외)
   accuracy: number;
   processingTimeMs: number;
 }
@@ -44,6 +46,8 @@ export interface ParallelAnalysisOptions {
   skipVision?: boolean;
   /** 페이지 로드 대기 시간 ms (기본: 3000) */
   pageWaitTime?: number;
+  /** GA4 Property ID (Edge Case 적용용) */
+  ga4PropertyId?: string;
 }
 
 interface PageCaptureData {
@@ -61,6 +65,39 @@ const AUTO_COLLECTED_EVENTS = [
   'page_view', 'screen_view', 'session_start', 'first_visit', 'user_engagement'
 ];
 
+// Vision AI 필터링 스킵 이벤트 (거의 모든 페이지에서 발생하는 범용 클릭 이벤트)
+// 이 이벤트들은 GTM 분석을 통과하면 Vision AI 결과와 상관없이 예측에 포함
+const VISION_FILTER_SKIP_EVENTS = [
+  'ap_click',  // 일반 클릭 추적 - 모든 페이지에 클릭 가능한 요소 존재
+];
+
+// 페이지 타입별 필수 이벤트 (개발가이드 기준)
+// Vision AI 필터링 무시 - GTM 분석 통과 시 무조건 예측에 포함
+// ⚠️ 주의: GA4 수집 데이터가 아닌 개발가이드 기준으로 설정
+// SPA로 인해 잘못 수집된 이벤트는 제외 (예: view_promotion이 MY에서 5.73% 수집되나 개발가이드상 MAIN만)
+const PAGE_TYPE_REQUIRED_EVENTS: Record<string, string[]> = {
+  'MAIN': ['click_with_duration', 'select_promotion', 'login', 'view_promotion', 'scroll'],
+  'PRODUCT_DETAIL': ['add_to_cart', 'view_item', 'scroll', 'click_with_duration', 'begin_checkout'],
+  'SEARCH_RESULT': ['select_item', 'view_item_list', 'view_search_results'],
+  'EVENT_DETAIL': ['click_with_duration', 'video_start', 'video_progress', 'scroll', 'view_promotion_detail'],
+  'BRAND_MAIN': ['brand_product_click', 'click_with_duration', 'scroll'],
+  'BRAND_PRODUCT_LIST': ['brand_product_click', 'click_with_duration'],
+  'BRAND_EVENT_LIST': [],
+  'BRAND_CUSTOM_ETC': ['click_with_duration'],
+  'BRAND_LIST': [],  // 개발가이드: view_promotion은 MAIN에서만
+  'MY': [],  // 개발가이드: view_promotion, add_to_cart은 SPA 노이즈
+  'HISTORY': ['click_with_duration', 'login', 'custom_event'],  // view_promotion 제거 (SPA 노이즈)
+  'CART': ['begin_checkout'],
+  'LIVE_DETAIL': ['live'],
+  'LIVE_LIST': [],  // 개발가이드: view_promotion은 MAIN에서만
+  'CATEGORY_LIST': [],  // 개발가이드: view_promotion, select_promotion은 MAIN에서만
+  'MEMBERSHIP': [],
+  'EVENT_LIST': [],  // 개발가이드: view_promotion은 MAIN에서만
+  'AMORESTORE': [],  // 개발가이드: view_promotion은 MAIN에서만
+  'BEAUTYFEED': [],  // 개발가이드: view_search_results는 SEARCH_RESULT에서만
+  'CUSTOMER': [],
+};
+
 export class ParallelContentGroupAnalyzer {
   private browserPool: BrowserPoolManager;
   private visionProcessor: VisionBatchProcessor;
@@ -70,6 +107,7 @@ export class ParallelContentGroupAnalyzer {
   private analyzer: IntegratedEventAnalyzer | null = null;
   private readonly apiKey: string;
   private readonly options: Required<ParallelAnalysisOptions>;
+  private edgeCases: EdgeCase[] = [];
 
   constructor(apiKey: string, options: ParallelAnalysisOptions = {}) {
     this.apiKey = apiKey;
@@ -78,7 +116,14 @@ export class ParallelContentGroupAnalyzer {
       maxVisionConcurrency: options.maxVisionConcurrency ?? 4,
       skipVision: options.skipVision ?? false,
       pageWaitTime: options.pageWaitTime ?? 3000,
+      ga4PropertyId: options.ga4PropertyId ?? '',
     };
+
+    // Edge Cases 로드
+    if (this.options.ga4PropertyId) {
+      this.edgeCases = edgeCaseLoader.getEdgeCasesForProperty(this.options.ga4PropertyId);
+      console.log(`📌 Edge Cases loaded: ${this.edgeCases.length} cases for property ${this.options.ga4PropertyId}`);
+    }
 
     this.browserPool = new BrowserPoolManager({
       maxConcurrency: this.options.maxBrowserConcurrency,
@@ -262,6 +307,82 @@ export class ParallelContentGroupAnalyzer {
   }
 
   /**
+   * Edge Case 적용하여 예측 필터링
+   * @param predictions 원본 예측 이벤트 목록
+   * @param pageType 페이지 타입
+   * @returns Edge Case가 적용된 예측 이벤트 목록
+   */
+  private applyEdgeCases(predictions: string[], pageType: string): {
+    filtered: string[];
+    appliedCases: { eventName: string; type: string; reason: string }[];
+  } {
+    if (this.edgeCases.length === 0) {
+      return { filtered: predictions, appliedCases: [] };
+    }
+
+    const appliedCases: { eventName: string; type: string; reason: string }[] = [];
+    const filtered = predictions.filter(eventName => {
+      const edgeCase = this.edgeCases.find(ec => ec.eventName === eventName);
+
+      if (!edgeCase) {
+        return true; // Edge Case 없으면 통과
+      }
+
+      switch (edgeCase.type) {
+        case 'PAGE_RESTRICTION':
+          // 허용된 페이지 타입에 없으면 제외
+          if (edgeCase.allowedPageTypes && !edgeCase.allowedPageTypes.includes(pageType)) {
+            appliedCases.push({
+              eventName,
+              type: edgeCase.type,
+              reason: `Only allowed on ${edgeCase.allowedPageTypes.join(', ')}`
+            });
+            return false;
+          }
+          break;
+
+        case 'PAGE_EXCLUSION':
+          // 제외된 페이지 타입이면 제외
+          if (edgeCase.excludedPageTypes && edgeCase.excludedPageTypes.includes(pageType)) {
+            appliedCases.push({
+              eventName,
+              type: edgeCase.type,
+              reason: `Excluded from ${pageType}`
+            });
+            return false;
+          }
+          break;
+
+        case 'NOT_IMPLEMENTED':
+        case 'DEPRECATED':
+          // 미구현 또는 폐지된 이벤트 제외
+          appliedCases.push({
+            eventName,
+            type: edgeCase.type,
+            reason: edgeCase.description
+          });
+          return false;
+
+        case 'NOISE_EXPECTED':
+          // 노이즈 예상 이벤트는 해당 페이지에서 예측에서 제외
+          if (edgeCase.affectedPageTypes?.includes(pageType)) {
+            appliedCases.push({
+              eventName,
+              type: edgeCase.type,
+              reason: `Noise expected on ${pageType} (${edgeCase.expectedNoisePercent}%)`
+            });
+            return false;
+          }
+          break;
+      }
+
+      return true;
+    });
+
+    return { filtered, appliedCases };
+  }
+
+  /**
    * 결과 병합 및 정확도 계산
    */
   private mergeResults(
@@ -277,7 +398,18 @@ export class ParallelContentGroupAnalyzer {
       if (visionResults) {
         const visionResult = visionResults.get(config.contentGroup);
         if (visionResult) {
+          // 페이지 타입별 필수 이벤트 목록
+          const requiredEvents = PAGE_TYPE_REQUIRED_EVENTS[pd.pageType] || [];
+
           predicted = predicted.filter(eventName => {
+            // Vision AI 필터링 스킵 이벤트는 무조건 포함
+            if (VISION_FILTER_SKIP_EVENTS.includes(eventName)) {
+              return true;
+            }
+            // 페이지 타입별 필수 이벤트는 무조건 포함
+            if (requiredEvents.includes(eventName)) {
+              return true;
+            }
             const vr = visionResult.find(v => v.eventName === eventName);
             // Vision AI가 hasUI: false로 판단한 이벤트 제외
             return vr?.hasUI !== false;
@@ -285,14 +417,33 @@ export class ParallelContentGroupAnalyzer {
         }
       }
 
+      // Edge Case 적용 (Vision AI 필터링 후 적용)
+      const edgeCaseResult = this.applyEdgeCases(predicted, pd.pageType);
+      predicted = edgeCaseResult.filtered;
+
+      // Edge Case 적용 로깅
+      if (edgeCaseResult.appliedCases.length > 0) {
+        console.log(`   🔧 ${config.contentGroup}: Edge Cases applied:`);
+        for (const ec of edgeCaseResult.appliedCases) {
+          console.log(`      - ${ec.eventName} [${ec.type}]: ${ec.reason}`);
+        }
+      }
+
       // 자동 수집 이벤트 제외
       predicted = predicted.filter(e => !AUTO_COLLECTED_EVENTS.includes(e));
       const ga4Actual = config.ga4TopEvents.filter(e => !AUTO_COLLECTED_EVENTS.includes(e));
 
+      // SESSION_ONCE 이벤트 목록 (세션당 1회만 발생하므로 정확도 계산에서 제외)
+      const sessionOnceEvents = this.edgeCases
+        .filter(ec => ec.type === 'SESSION_ONCE')
+        .map(ec => ec.eventName);
+
       // 정확도 계산
       const correct = predicted.filter(p => ga4Actual.includes(p));
       const missed = ga4Actual.filter(a => !predicted.includes(a));
-      const wrong = predicted.filter(p => !ga4Actual.includes(p));
+      // SESSION_ONCE 이벤트는 "잘못된 예측"에서 제외 (세션 내 다른 페이지에서 이미 발생했을 수 있음)
+      const wrong = predicted.filter(p => !ga4Actual.includes(p) && !sessionOnceEvents.includes(p));
+      const sessionOnceSkipped = predicted.filter(p => !ga4Actual.includes(p) && sessionOnceEvents.includes(p));
       const accuracy = correct.length / (correct.length + wrong.length) * 100 || 0;
 
       return {
@@ -305,6 +456,7 @@ export class ParallelContentGroupAnalyzer {
         correct,
         missed,
         wrong,
+        sessionOnceSkipped,
         accuracy,
         processingTimeMs: Date.now() - pd.startTime,
       };

@@ -16,56 +16,140 @@ import {
 
 dotenv.config();
 
-// GA4 컨텐츠 그룹별 테스트 대상 페이지
+// GA4 Property ID (Edge Case 적용용)
+const GA4_PROPERTY_ID = process.env.GA4_PROPERTY_ID || '416629733';
+
+// GA4 컨텐츠 그룹별 테스트 대상 페이지 (SKINNOTE_*, OTHERS 제외)
 const CONTENT_GROUP_PAGES: ContentGroupConfig[] = [
+  // === 기존 테스트 ===
   {
     contentGroup: 'MAIN',
     pagePath: '/kr/ko/display/main',
     url: 'https://www.amoremall.com/kr/ko/display/main',
-    ga4TopEvents: ['screen_view', 'ap_click', 'view_promotion', 'page_view', 'scroll', 'click_with_duration', 'select_promotion', 'qualified_visit', 'login']
+    ga4TopEvents: ['ap_click', 'screen_view', 'view_promotion', 'page_view', 'scroll', 'select_promotion', 'click_with_duration', 'qualified_visit', 'login']
   },
   {
     contentGroup: 'PRODUCT_DETAIL',
-    pagePath: '/kr/ko/display/goodsDetail',
-    url: 'https://www.amoremall.com/kr/ko/display/goodsDetail?goodsId=0010102730001',
-    ga4TopEvents: ['scroll', 'ap_click', 'view_item', 'page_view', 'add_to_cart', 'click_with_duration', 'qualified_visit']
+    pagePath: '/kr/ko/product/detail',
+    url: 'https://www.amoremall.com/kr/ko/product/detail?onlineProdSn=67657&onlineProdCode=111070002290',
+    ga4TopEvents: ['scroll', 'ap_click', 'view_item', 'screen_view', 'page_view', 'add_to_cart', 'click_with_duration', 'begin_checkout', 'qualified_visit']
   },
   {
     contentGroup: 'EVENT_DETAIL',
     pagePath: '/kr/ko/display/event_detail',
-    url: 'https://www.amoremall.com/kr/ko/display/event_detail?eventId=2412_apsesta',
-    ga4TopEvents: ['scroll', 'view_promotion_detail', 'page_view', 'video_progress', 'screen_view', 'ap_click', 'click_with_duration', 'video_start', 'qualified_visit']
+    url: 'https://www.amoremall.com/kr/ko/display/event_detail?planDisplaySn=13681',
+    ga4TopEvents: ['scroll', 'view_promotion_detail', 'video_progress', 'page_view', 'ap_click', 'screen_view', 'video_start', 'qualified_visit', 'click_with_duration']
   },
   {
     contentGroup: 'SEARCH_RESULT',
-    pagePath: '/kr/ko/display/search',
+    pagePath: '/kr/ko/search',
     url: 'https://www.amoremall.com/kr/ko/search?searchKeyword=%EC%84%A4%ED%99%94%EC%88%98',
-    ga4TopEvents: ['page_view', 'ap_click', 'view_search_results', 'view_item_list', 'select_item', 'qualified_visit']
+    ga4TopEvents: ['ap_click', 'view_search_results', 'view_item_list', 'screen_view', 'select_item', 'page_view', 'qualified_visit']
   },
   {
     contentGroup: 'BRAND_MAIN',
     pagePath: '/kr/ko/display/brand/detail',
-    url: 'https://www.amoremall.com/kr/ko/display/brand/detail?brandNo=20001',
-    ga4TopEvents: ['scroll', 'ap_click', 'screen_view', 'page_view', 'brand_product_click', 'click_with_duration', 'qualified_visit']
+    url: 'https://www.amoremall.com/kr/ko/display/brand/detail?brandSn=15',
+    ga4TopEvents: ['scroll', 'ap_click', 'screen_view', 'page_view', 'brand_product_click', 'qualified_visit', 'click_with_duration']
   },
   {
     contentGroup: 'PRODUCT_LIST',
     pagePath: '/kr/ko/display/category',
     url: 'https://www.amoremall.com/kr/ko/display/category?categoryId=10001',
-    ga4TopEvents: ['ap_click', 'page_view', 'qualified_visit', 'screen_view']
+    ga4TopEvents: ['ap_click', 'screen_view', 'page_view', 'qualified_visit']
   },
   {
     contentGroup: 'MY',
     pagePath: '/kr/ko/my/page/info/myPouch',
     url: 'https://www.amoremall.com/kr/ko/my/page/info/myPouch',
-    ga4TopEvents: ['ap_click', 'screen_view', 'page_view', 'custom_event', 'view_promotion', 'qualified_visit']
+    ga4TopEvents: ['ap_click', 'screen_view', 'page_view', 'qualified_visit', 'view_promotion', 'add_to_cart']
   },
   {
     contentGroup: 'HISTORY',
     pagePath: '/kr/ko/display/history',
     url: 'https://www.amoremall.com/kr/ko/display/history',
-    ga4TopEvents: ['screen_view', 'ap_click', 'page_view', 'custom_event', 'view_promotion', 'qualified_visit', 'login', 'click_with_duration']
-  }
+    ga4TopEvents: ['ap_click', 'screen_view', 'custom_event', 'page_view', 'view_promotion', 'qualified_visit', 'login', 'click_with_duration']
+  },
+  {
+    contentGroup: 'BRAND_PRODUCT_LIST',
+    pagePath: '/kr/ko/display/brand/detail/all',
+    url: 'https://www.amoremall.com/kr/ko/display/brand/detail/all?brandSn=18',
+    ga4TopEvents: ['ap_click', 'brand_product_click', 'page_view', 'screen_view', 'click_with_duration', 'qualified_visit']
+  },
+
+  // === 새로 추가된 테스트 ===
+  {
+    contentGroup: 'CART',
+    pagePath: '/kr/ko/cart/cartList',
+    url: 'https://www.amoremall.com/kr/ko/cart/cartList',
+    ga4TopEvents: ['ap_click', 'begin_checkout', 'screen_view', 'page_view', 'qualified_visit']
+  },
+  {
+    contentGroup: 'LIVE_DETAIL',
+    pagePath: '/kr/ko/display/live/player',
+    url: 'https://www.amoremall.com/kr/ko/display/live/player?sy_id=691d716b1ccf98049b711174',
+    ga4TopEvents: ['ap_click', 'live', 'page_view', 'screen_view', 'qualified_visit']
+  },
+  {
+    contentGroup: 'LIVE_LIST',
+    pagePath: '/kr/ko/display/live',
+    url: 'https://www.amoremall.com/kr/ko/display/live',
+    ga4TopEvents: ['ap_click', 'screen_view', 'page_view', 'qualified_visit', 'view_promotion']
+  },
+  {
+    contentGroup: 'CATEGORY_LIST',
+    pagePath: '/kr/ko/display/category/main',
+    url: 'https://www.amoremall.com/kr/ko/display/category/main',
+    ga4TopEvents: ['ap_click', 'screen_view', 'view_promotion', 'select_promotion']
+  },
+  {
+    contentGroup: 'MEMBERSHIP',
+    pagePath: '/kr/ko/membershipPlus/join',
+    url: 'https://www.amoremall.com/kr/ko/membershipPlus/join',
+    ga4TopEvents: ['ap_click', 'page_view', 'screen_view', 'qualified_visit']
+  },
+  {
+    contentGroup: 'EVENT_LIST',
+    pagePath: '/kr/ko/display/event',
+    url: 'https://www.amoremall.com/kr/ko/display/event',
+    ga4TopEvents: ['ap_click', 'screen_view', 'page_view', 'qualified_visit', 'view_promotion']
+  },
+  {
+    contentGroup: 'BRAND_LIST',
+    pagePath: '/kr/ko/display/brand',
+    url: 'https://www.amoremall.com/kr/ko/display/brand',
+    ga4TopEvents: ['ap_click', 'screen_view', 'view_promotion']
+  },
+  {
+    contentGroup: 'AMORESTORE',
+    pagePath: '/kr/ko/store/foreigner',
+    url: 'https://www.amoremall.com/kr/ko/store/foreigner',
+    ga4TopEvents: ['page_view', 'ap_click', 'screen_view', 'qualified_visit', 'view_promotion']
+  },
+  {
+    contentGroup: 'BEAUTYFEED',
+    pagePath: '/kr/ko/community/display/main',
+    url: 'https://www.amoremall.com/kr/ko/community/display/main',
+    ga4TopEvents: ['ap_click', 'screen_view', 'page_view', 'qualified_visit', 'view_search_results']
+  },
+  {
+    contentGroup: 'CUSTOMER',
+    pagePath: '/kr/ko/cs/faq',
+    url: 'https://www.amoremall.com/kr/ko/cs/faq',
+    ga4TopEvents: ['ap_click', 'page_view', 'screen_view', 'qualified_visit']
+  },
+  {
+    contentGroup: 'BRAND_EVENT_LIST',
+    pagePath: '/kr/ko/display/brand/detail/event',
+    url: 'https://www.amoremall.com/kr/ko/display/brand/detail/event?brandSn=11',
+    ga4TopEvents: ['ap_click', 'page_view', 'screen_view', 'qualified_visit']
+  },
+  {
+    contentGroup: 'BRAND_CUSTOM_ETC',
+    pagePath: '/kr/ko/display/brand/detail',
+    url: 'https://www.amoremall.com/kr/ko/display/brand/detail?brandSn=15&menuNo=630',
+    ga4TopEvents: ['ap_click', 'page_view', 'screen_view', 'click_with_duration', 'qualified_visit']
+  },
 ];
 
 /**
@@ -135,6 +219,9 @@ function printIndividualResults(results: ParallelAnalysisResult[]): void {
     console.log(`\n   ✅ 정확히 예측: ${r.correct.join(', ') || '없음'}`);
     console.log(`   ⚠️ 누락 (GA4에는 있음): ${r.missed.join(', ') || '없음'}`);
     console.log(`   ❌ 잘못 예측: ${r.wrong.join(', ') || '없음'}`);
+    if (r.sessionOnceSkipped.length > 0) {
+      console.log(`   🔄 SESSION_ONCE (정확도 제외): ${r.sessionOnceSkipped.join(', ')}`);
+    }
     console.log(`   📈 정확도: ${r.accuracy.toFixed(1)}%`);
   }
 }
@@ -166,6 +253,7 @@ function saveResults(results: ParallelAnalysisResult[]): void {
       correct: r.correct,
       missed: r.missed,
       wrong: r.wrong,
+      sessionOnceSkipped: r.sessionOnceSkipped,
       accuracy: r.accuracy,
       processingTimeMs: r.processingTimeMs,
     })),
@@ -204,7 +292,10 @@ async function main() {
     maxVisionConcurrency: 4,
     skipVision: false,  // true로 변경하면 Vision AI 스킵 (빠른 테스트)
     pageWaitTime: 3000,
+    ga4PropertyId: GA4_PROPERTY_ID,  // Edge Case 적용
   });
+
+  console.log(`🔧 GA4 Property ID: ${GA4_PROPERTY_ID}`);
 
   try {
     await analyzer.initialize();

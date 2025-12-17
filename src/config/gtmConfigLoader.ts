@@ -22,6 +22,7 @@ import {
   PageTypeMismatch
 } from '../parsers/developmentGuideParser';
 import { PageType } from '../types/pageContext';
+import { EventParameterExtractor, EventParameterDefinition, EventParameterConfig } from './eventParameterConfig';
 
 /**
  * 미리 로드된 GTM 설정
@@ -54,6 +55,9 @@ export interface PreloadedGTMConfig {
 
   // appendix vs GTM 불일치 목록
   pageTypeMismatches: PageTypeMismatch[];
+
+  // 이벤트별 파라미터 정의 (GTM 태그에서 추출)
+  eventParameters: Map<string, EventParameterDefinition>;
 
   // 로드 시간
   loadedAt: Date;
@@ -121,7 +125,16 @@ export class GTMConfigLoader {
     console.log('  ├─ GA4 표준 매핑 로드 중...');
     const ga4StandardMappings = DevelopmentGuideParser.getAllGA4StandardMappings();
 
-    // 5. appendix vs GTM 불일치 감지
+    // 5. 이벤트 파라미터 추출
+    console.log('  ├─ 이벤트 파라미터 추출 중...');
+    const paramExtractor = new EventParameterExtractor(this.options.gtmJsonPath);
+    const paramConfig = paramExtractor.extractAllEventParameters();
+    const eventParameters = new Map<string, EventParameterDefinition>();
+    for (const event of paramConfig.events) {
+      eventParameters.set(event.eventName, event);
+    }
+
+    // 6. appendix vs GTM 불일치 감지
     console.log('  ├─ 불일치 감지 중...');
     const pageTypeMismatches = comparePageTypeMappings(pageTypeDefinitions, contentGroupLookup);
 
@@ -150,6 +163,7 @@ export class GTMConfigLoader {
       eventDefinitions,
       ga4StandardMappings,
       pageTypeMismatches,
+      eventParameters,
       loadedAt: new Date(),
     };
 
@@ -257,49 +271,50 @@ export class GTMConfigLoader {
 
   /**
    * 특정 페이지 타입에서 발생 가능한 이벤트 목록을 반환합니다.
+   *
+   * D 복합 방식: GTM + 개발가이드 + GA4 표준을 통합하고,
+   * isEventAllowedOnPage 로직으로 필터링하여 정확한 결과 반환
    */
   getEventsForPageType(pageType: PageType): {
     eventName: string;
     source: string;
     confidence: number;
+    reason?: string;
   }[] {
     const config = this.getConfig();
-    const events: { eventName: string; source: string; confidence: number }[] = [];
+
+    // 1. 모든 소스에서 이벤트 이름 수집 (중복 제거)
+    const allEventNames = new Set<string>();
 
     // GTM 이벤트
-    for (const [eventName, mapping] of config.eventPageMappings) {
-      if (mapping.allowedPageTypes.includes(pageType)) {
-        events.push({
-          eventName,
-          source: 'gtm',
-          confidence: mapping.confidence
-        });
-      }
+    for (const [eventName] of config.eventPageMappings) {
+      allEventNames.add(eventName);
     }
 
     // 개발가이드 이벤트
     for (const event of config.eventDefinitions) {
-      if (event.allowedPageTypes.includes(pageType) || event.allowedPageTypes.includes('ALL')) {
-        if (!events.find(e => e.eventName === event.eventName)) {
-          events.push({
-            eventName: event.eventName,
-            source: 'devguide',
-            confidence: 80
-          });
-        }
-      }
+      allEventNames.add(event.eventName);
     }
 
     // GA4 표준 이벤트
-    for (const [eventName, pageTypes] of Object.entries(config.ga4StandardMappings)) {
-      if (pageTypes.includes(pageType)) {
-        if (!events.find(e => e.eventName === eventName)) {
-          events.push({
-            eventName,
-            source: 'ga4_standard',
-            confidence: 70
-          });
-        }
+    for (const eventName of Object.keys(config.ga4StandardMappings)) {
+      allEventNames.add(eventName);
+    }
+
+    // 2. 각 이벤트에 대해 isEventAllowedOnPage로 필터링
+    const events: { eventName: string; source: string; confidence: number; reason?: string }[] = [];
+
+    for (const eventName of allEventNames) {
+      const check = this.isEventAllowedOnPage(eventName, pageType);
+
+      // 허용된 이벤트만 추가
+      if (check.allowed) {
+        events.push({
+          eventName,
+          source: check.source,
+          confidence: check.confidence,
+          reason: check.reason,
+        });
       }
     }
 
@@ -321,6 +336,24 @@ export class GTMConfigLoader {
   }
 
   /**
+   * 특정 이벤트의 파라미터 정의를 반환합니다.
+   */
+  getEventParameters(eventName: string): EventParameterDefinition | undefined {
+    return this.getConfig().eventParameters.get(eventName);
+  }
+
+  /**
+   * 모든 이벤트의 파라미터 키 목록을 반환합니다.
+   */
+  getAllEventParameterKeys(): Map<string, string[]> {
+    const result = new Map<string, string[]>();
+    for (const [eventName, definition] of this.getConfig().eventParameters) {
+      result.set(eventName, definition.parameters.map(p => p.key));
+    }
+    return result;
+  }
+
+  /**
    * 요약 정보를 출력합니다.
    */
   printSummary(): void {
@@ -339,6 +372,7 @@ export class GTMConfigLoader {
     console.log(`  - GTM 이벤트-페이지 매핑: ${config.eventPageMappings.size}개`);
     console.log(`  - 개발가이드 이벤트 정의: ${config.eventDefinitions.length}개`);
     console.log(`  - GA4 표준 매핑: ${Object.keys(config.ga4StandardMappings).length}개`);
+    console.log(`  - 이벤트 파라미터 정의: ${config.eventParameters.size}개`);
 
     if (config.pageTypeMismatches.length > 0) {
       console.log(`\n⚠️  불일치: ${config.pageTypeMismatches.length}개`);

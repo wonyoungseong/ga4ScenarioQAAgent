@@ -5,16 +5,27 @@
 export type PageType =
   | 'MAIN'           // 메인 페이지
   | 'BRAND_MAIN'     // 브랜드 메인 페이지 (AP몰만 해당)
+  | 'BRAND_PRODUCT_LIST'  // 브랜드 상품 목록 페이지 (AP몰)
+  | 'BRAND_EVENT_LIST'    // 브랜드 이벤트 목록 페이지 (AP몰)
+  | 'BRAND_CUSTOM_ETC'    // 브랜드 커스텀 기타 페이지 (AP몰)
+  | 'BRAND_LIST'     // 브랜드 목록 페이지
   | 'PRODUCT_DETAIL' // 상품 상세 페이지
   | 'PRODUCT_LIST'   // 상품 리스트 페이지
+  | 'CATEGORY_LIST'  // 카테고리 메인 페이지
+  | 'SEARCH'         // 검색 레이어 페이지
   | 'SEARCH_RESULT'  // 검색 결과 페이지
   | 'CART'           // 장바구니 페이지
   | 'ORDER'          // 주문서 페이지
   | 'MY'             // 마이 페이지
+  | 'MEMBERSHIP'     // 멤버십 페이지
+  | 'CUSTOMER'       // 고객센터 페이지
   | 'EVENT_LIST'     // 이벤트 리스트 페이지
   | 'EVENT_DETAIL'   // 이벤트 상세 페이지
   | 'LIVE_LIST'      // 라이브 리스트 페이지
   | 'LIVE_DETAIL'    // 라이브 상세 페이지
+  | 'HISTORY'        // 히스토리/연혁 페이지 (아모레몰)
+  | 'AMORESTORE'     // 아모레스토어 페이지
+  | 'BEAUTYFEED'     // 뷰티피드 페이지
   | 'OTHERS';        // 그 외 모두
 
 /**
@@ -166,26 +177,168 @@ export const DATALAYER_EVENT_PAGE_MAPPING: Record<string, PageType[]> = {
 
 /**
  * URL 패턴 기반 페이지 타입 감지 규칙
+ *
+ * ⚠️ 중요: 규칙 순서가 매우 중요합니다!
+ * 더 구체적인 규칙이 먼저 매칭되어야 합니다.
+ * 예: /display/brand/detail/event는 /display/brand/detail보다 먼저 체크해야 함
  */
 export const PAGE_TYPE_DETECTION_RULES: PageTypeDetectionRule[] = [
+  // ===============================
+  // 1. 가장 구체적인 규칙들 (먼저 체크)
+  // ===============================
+
+  // 브랜드 하위 페이지들 (BRAND_MAIN보다 먼저 체크해야 함)
   {
-    pageType: 'MAIN',
+    pageType: 'BRAND_EVENT_LIST',
     urlPatterns: [
-      /\/display\/main$/i,
-      /\/main\.do$/i,
-      /\/Main\.do$/i,
-      /^https?:\/\/[^\/]+\/?$/i,  // 루트 URL
+      /\/display\/brand\/detail\/event/i,  // 아모레몰 브랜드 이벤트 목록
     ],
-    urlKeywords: ['main', 'index'],
-    description: '메인 페이지'
+    urlKeywords: ['brand', 'event'],
+    description: '브랜드 이벤트 목록 페이지'
   },
+  {
+    pageType: 'BRAND_PRODUCT_LIST',
+    urlPatterns: [
+      /\/display\/brand\/detail\/all/i,  // 아모레몰 브랜드 전체 상품 목록
+      /\/brand\/[^\/]+\/products/i,
+      /\/brand\/[^\/]+\/all/i,
+    ],
+    urlKeywords: ['brand', 'all', 'products'],
+    description: '브랜드 상품 목록 페이지'
+  },
+  {
+    pageType: 'BRAND_CUSTOM_ETC',
+    urlPatterns: [
+      /\/display\/brand\/detail\?[^#]*menuNo=/i,  // 아모레몰 브랜드 커스텀 페이지 (menuNo 파라미터)
+    ],
+    urlKeywords: ['brand', 'menu'],
+    description: '브랜드 커스텀 기타 페이지'
+  },
+
+  // 라이브 상세 (라이브 목록보다 먼저)
+  {
+    pageType: 'LIVE_DETAIL',
+    urlPatterns: [
+      /\/live\/player/i,         // 아모레몰 라이브 플레이어
+      /\/display\/live\/player/i,
+      /\/live\/\d+/i,
+      /\/live\/[^\/]+\/detail/i,
+      /liveNo=/i,
+      /sy_id=/i,                 // 아모레몰 라이브 ID 파라미터
+    ],
+    urlKeywords: ['live', 'player'],
+    description: '라이브 상세 페이지'
+  },
+
+  // 카테고리 메인 (PRODUCT_LIST보다 먼저)
+  {
+    pageType: 'CATEGORY_LIST',
+    urlPatterns: [
+      /\/display\/category\/main/i,  // 아모레몰 카테고리 메인
+      /\/category\/main/i,
+    ],
+    urlKeywords: ['category', 'main'],
+    description: '카테고리 메인 페이지'
+  },
+
+  // 뷰티피드 (MAIN보다 먼저 - /community/display/main 패턴)
+  {
+    pageType: 'BEAUTYFEED',
+    urlPatterns: [
+      /\/community\/display/i,   // 뷰티피드
+      /\/beautyfeed/i,
+    ],
+    urlKeywords: ['community', 'beautyfeed'],
+    description: '뷰티피드 페이지'
+  },
+
+  // 브랜드 목록 (PRODUCT_LIST보다 먼저 - /display/brand$ 정확히 매칭)
+  {
+    pageType: 'BRAND_LIST',
+    urlPatterns: [
+      /\/display\/brand$/i,      // 아모레몰 브랜드 목록 (정확히 /display/brand로 끝남)
+      /\/brands$/i,
+    ],
+    urlKeywords: ['brand'],
+    description: '브랜드 목록 페이지'
+  },
+
+  // 이벤트 상세 (이벤트 목록보다 먼저)
+  {
+    pageType: 'EVENT_DETAIL',
+    urlPatterns: [
+      /\/event\/\d+/i,
+      /\/event\/[^\/]+\/detail/i,
+      /\/event_detail/i,
+      /\/promotion\/\d+/i,
+      /\/display\/event_detail/i,
+      /planDisplaySn=/i,              // 아모레몰 이벤트 상세 쿼리 파라미터
+      /eventNo=/i,
+      /promotionNo=/i,
+    ],
+    urlKeywords: [],
+    description: '이벤트 상세 페이지'
+  },
+
+  // 멤버십 (MY보다 먼저)
+  {
+    pageType: 'MEMBERSHIP',
+    urlPatterns: [
+      /\/membershipPlus/i,       // 아모레몰 멤버십
+      /\/membership/i,
+    ],
+    urlKeywords: ['membership'],
+    description: '멤버십 페이지'
+  },
+
+  // 히스토리 (일반 규칙보다 먼저)
+  {
+    pageType: 'HISTORY',
+    urlPatterns: [
+      /\/display\/history/i,     // 아모레몰 히스토리/연혁 페이지
+      /\/history$/i,
+      /\/about\/history/i,
+      /\/company\/history/i,
+    ],
+    urlKeywords: ['history'],
+    description: '히스토리/연혁 페이지'
+  },
+
+  // 아모레스토어 (store 일반 규칙보다 먼저)
+  {
+    pageType: 'AMORESTORE',
+    urlPatterns: [
+      /\/store\/foreigner/i,     // 아모레스토어
+    ],
+    urlKeywords: ['store', 'foreigner'],
+    description: '아모레스토어 페이지'
+  },
+
+  // 고객센터
+  {
+    pageType: 'CUSTOMER',
+    urlPatterns: [
+      /\/cs\//i,                 // 아모레몰 고객센터
+      /\/customer/i,
+      /\/faq/i,
+      /\/help/i,
+    ],
+    urlKeywords: ['cs', 'customer', 'faq', 'help'],
+    description: '고객센터 페이지'
+  },
+
+  // ===============================
+  // 2. 중간 구체성 규칙들
+  // ===============================
+
+  // 브랜드 메인 (브랜드 하위 페이지들 이후에 체크)
   {
     pageType: 'BRAND_MAIN',
     urlPatterns: [
-      /\/display\/brand\/detail/i,    // 아모레몰 브랜드 상세 페이지
+      /\/display\/brand\/detail(?!\/(all|event))/i,  // /all, /event 제외
       /\/brand\/[^\/]+\/main/i,
       /\/store\/display\?storeCode=/i,
-      /\/primera$/i,                   // 아모레몰 브랜드 전용 페이지 (설화수, 프리메라 등)
+      /\/primera$/i,
       /\/sulwhasoo$/i,
       /\/hera$/i,
       /\/iope$/i,
@@ -199,34 +352,25 @@ export const PAGE_TYPE_DETECTION_RULES: PageTypeDetectionRule[] = [
     urlKeywords: ['brand', 'store'],
     description: '브랜드 메인 페이지'
   },
+
+  // 상품 상세
   {
     pageType: 'PRODUCT_DETAIL',
     urlPatterns: [
-      /\/product\/detail/i,     // /product/detail 패턴 (아모레몰)
+      /\/product\/detail/i,
       /\/product\/\d+/i,
       /\/goods\/\d+/i,
       /\/item\/\d+/i,
       /\/display\/goods/i,
       /productCode=/i,
       /goodsNo=/i,
-      /prdtCd=/i,               // 상품 코드 파라미터
+      /prdtCd=/i,
     ],
     urlKeywords: ['product', 'goods', 'item', 'detail'],
     description: '상품 상세 페이지'
   },
-  {
-    pageType: 'PRODUCT_LIST',
-    urlPatterns: [
-      /\/category\//i,
-      /\/display\/category/i,
-      /\/display\/brand/i,      // 브랜드 페이지 (상품 리스트 표시)
-      /\/products$/i,
-      /\/list\.do/i,
-      /brandCd=/i,              // 브랜드 코드 파라미터
-    ],
-    urlKeywords: ['category', 'list', 'products', 'brand'],
-    description: '상품 리스트 페이지'
-  },
+
+  // 검색 결과
   {
     pageType: 'SEARCH_RESULT',
     urlPatterns: [
@@ -235,10 +379,13 @@ export const PAGE_TYPE_DETECTION_RULES: PageTypeDetectionRule[] = [
       /\?keyword=/i,
       /\?query=/i,
       /\?q=/i,
+      /searchKeyword=/i,
     ],
     urlKeywords: ['search', 'keyword', 'query'],
     description: '검색 결과 페이지'
   },
+
+  // 장바구니
   {
     pageType: 'CART',
     urlPatterns: [
@@ -249,6 +396,8 @@ export const PAGE_TYPE_DETECTION_RULES: PageTypeDetectionRule[] = [
     urlKeywords: ['cart', 'basket', 'bag'],
     description: '장바구니 페이지'
   },
+
+  // 주문서
   {
     pageType: 'ORDER',
     urlPatterns: [
@@ -259,64 +408,75 @@ export const PAGE_TYPE_DETECTION_RULES: PageTypeDetectionRule[] = [
     urlKeywords: ['order', 'checkout', 'payment'],
     description: '주문서 페이지'
   },
-  {
-    pageType: 'MY',
-    urlPatterns: [
-      /\/my/i,
-      /\/mypage/i,
-      /\/member/i,
-      /\/account/i,
-    ],
-    urlKeywords: ['my', 'mypage', 'member', 'account'],
-    description: '마이 페이지'
-  },
+
+  // 이벤트 리스트
   {
     pageType: 'EVENT_LIST',
     urlPatterns: [
+      /\/display\/event$/i,
       /\/event$/i,
       /\/events$/i,
       /\/promotion$/i,
       /\/promotions$/i,
-      /\/display\/event$/i,
     ],
     urlKeywords: [],
     description: '이벤트 리스트 페이지'
   },
-  {
-    pageType: 'EVENT_DETAIL',
-    urlPatterns: [
-      /\/event\/\d+/i,
-      /\/event\/[^\/]+\/detail/i,
-      /\/event_detail/i,              // event_detail 패턴 추가
-      /\/promotion\/\d+/i,
-      /\/display\/event\//i,
-      /\/display\/event_detail/i,     // display/event_detail 패턴 추가
-      /eventNo=/i,
-      /promotionNo=/i,
-      /planDisplaySn=/i,              // 아모레몰 이벤트 상세 쿼리 파라미터
-    ],
-    urlKeywords: [],
-    description: '이벤트 상세 페이지'
-  },
+
+  // 라이브 리스트
   {
     pageType: 'LIVE_LIST',
     urlPatterns: [
+      /\/display\/live$/i,
       /\/live$/i,
       /\/lives$/i,
-      /\/display\/live$/i,
     ],
     urlKeywords: [],
     description: '라이브 리스트 페이지'
   },
+
+  // ===============================
+  // 3. 일반적인 규칙들 (마지막에 체크)
+  // ===============================
+
+  // 상품 리스트 (가장 일반적인 카테고리/브랜드 패턴)
   {
-    pageType: 'LIVE_DETAIL',
+    pageType: 'PRODUCT_LIST',
     urlPatterns: [
-      /\/live\/\d+/i,
-      /\/live\/[^\/]+\/detail/i,
-      /liveNo=/i,
+      /\/display\/category(?!\/main)/i,  // /main 제외
+      /\/category\/(?!main)/i,           // /main 제외
+      /\/products$/i,
+      /\/list\.do/i,
+      /brandCd=/i,
     ],
-    urlKeywords: [],
-    description: '라이브 상세 페이지'
+    urlKeywords: ['category', 'list', 'products'],
+    description: '상품 리스트 페이지'
+  },
+
+  // 마이 페이지
+  {
+    pageType: 'MY',
+    urlPatterns: [
+      /\/my\//i,                 // /my/ 다음에 뭔가 있어야 함
+      /\/mypage/i,
+      /\/account/i,
+    ],
+    urlKeywords: ['my', 'mypage', 'account'],
+    description: '마이 페이지'
+  },
+
+  // 메인 페이지 (가장 마지막에 체크)
+  {
+    pageType: 'MAIN',
+    urlPatterns: [
+      /\/kr\/ko\/display\/main$/i,  // 아모레몰 메인 (정확히 매칭)
+      /\/display\/main$/i,
+      /\/main\.do$/i,
+      /\/Main\.do$/i,
+      /^https?:\/\/[^\/]+\/?$/i,  // 루트 URL
+    ],
+    urlKeywords: ['main', 'index'],
+    description: '메인 페이지'
   },
 ];
 
@@ -376,16 +536,27 @@ export function getPageTypeDescription(pageType: PageType): string {
   const descriptions: Record<PageType, string> = {
     'MAIN': '메인 페이지',
     'BRAND_MAIN': '브랜드 메인 페이지',
+    'BRAND_PRODUCT_LIST': '브랜드 상품 목록 페이지',
+    'BRAND_EVENT_LIST': '브랜드 이벤트 목록 페이지',
+    'BRAND_CUSTOM_ETC': '브랜드 커스텀 기타 페이지',
+    'BRAND_LIST': '브랜드 목록 페이지',
     'PRODUCT_DETAIL': '상품 상세 페이지',
     'PRODUCT_LIST': '상품 리스트 페이지',
+    'CATEGORY_LIST': '카테고리 메인 페이지',
+    'SEARCH': '검색 레이어 페이지',
     'SEARCH_RESULT': '검색 결과 페이지',
     'CART': '장바구니 페이지',
     'ORDER': '주문서 페이지',
     'MY': '마이 페이지',
+    'MEMBERSHIP': '멤버십 페이지',
+    'CUSTOMER': '고객센터 페이지',
     'EVENT_LIST': '이벤트 리스트 페이지',
     'EVENT_DETAIL': '이벤트 상세 페이지',
     'LIVE_LIST': '라이브 리스트 페이지',
     'LIVE_DETAIL': '라이브 상세 페이지',
+    'HISTORY': '히스토리/연혁 페이지',
+    'AMORESTORE': '아모레스토어 페이지',
+    'BEAUTYFEED': '뷰티피드 페이지',
     'OTHERS': '기타 페이지',
   };
 
@@ -423,9 +594,11 @@ function normalizePageTypeValue(value: string): PageType | undefined {
 
   // 직접 매핑
   const validPageTypes: PageType[] = [
-    'MAIN', 'BRAND_MAIN', 'PRODUCT_DETAIL', 'PRODUCT_LIST',
-    'SEARCH_RESULT', 'CART', 'ORDER', 'MY',
-    'EVENT_LIST', 'EVENT_DETAIL', 'LIVE_LIST', 'LIVE_DETAIL', 'OTHERS'
+    'MAIN', 'BRAND_MAIN', 'BRAND_PRODUCT_LIST', 'BRAND_EVENT_LIST', 'BRAND_CUSTOM_ETC', 'BRAND_LIST',
+    'PRODUCT_DETAIL', 'PRODUCT_LIST', 'CATEGORY_LIST', 'SEARCH', 'SEARCH_RESULT',
+    'CART', 'ORDER', 'MY', 'MEMBERSHIP', 'CUSTOMER',
+    'EVENT_LIST', 'EVENT_DETAIL', 'LIVE_LIST', 'LIVE_DETAIL',
+    'HISTORY', 'AMORESTORE', 'BEAUTYFEED', 'OTHERS'
   ];
 
   if (validPageTypes.includes(normalizedValue as PageType)) {
@@ -826,9 +999,11 @@ function determinePageType(signals: PageTypeSignal[]): { pageType: PageType; con
 
   // 페이지 타입별 점수 계산
   const scores: Record<PageType, number> = {
-    'MAIN': 0, 'BRAND_MAIN': 0, 'PRODUCT_DETAIL': 0, 'PRODUCT_LIST': 0,
-    'SEARCH_RESULT': 0, 'CART': 0, 'ORDER': 0, 'MY': 0,
-    'EVENT_LIST': 0, 'EVENT_DETAIL': 0, 'LIVE_LIST': 0, 'LIVE_DETAIL': 0, 'OTHERS': 0,
+    'MAIN': 0, 'BRAND_MAIN': 0, 'BRAND_PRODUCT_LIST': 0, 'BRAND_EVENT_LIST': 0, 'BRAND_CUSTOM_ETC': 0, 'BRAND_LIST': 0,
+    'PRODUCT_DETAIL': 0, 'PRODUCT_LIST': 0, 'CATEGORY_LIST': 0, 'SEARCH': 0, 'SEARCH_RESULT': 0,
+    'CART': 0, 'ORDER': 0, 'MY': 0, 'MEMBERSHIP': 0, 'CUSTOMER': 0,
+    'EVENT_LIST': 0, 'EVENT_DETAIL': 0, 'LIVE_LIST': 0, 'LIVE_DETAIL': 0,
+    'HISTORY': 0, 'AMORESTORE': 0, 'BEAUTYFEED': 0, 'OTHERS': 0,
   };
 
   for (const signal of signals) {
@@ -929,15 +1104,26 @@ export async function detectPageTypeComprehensive(page: any, url: string): Promi
 export const ALL_PAGE_TYPES: PageType[] = [
   'MAIN',
   'BRAND_MAIN',
+  'BRAND_PRODUCT_LIST',
+  'BRAND_EVENT_LIST',
+  'BRAND_CUSTOM_ETC',
+  'BRAND_LIST',
   'PRODUCT_DETAIL',
   'PRODUCT_LIST',
+  'CATEGORY_LIST',
+  'SEARCH',
   'SEARCH_RESULT',
   'CART',
   'ORDER',
   'MY',
+  'MEMBERSHIP',
+  'CUSTOMER',
   'EVENT_LIST',
   'EVENT_DETAIL',
   'LIVE_LIST',
   'LIVE_DETAIL',
+  'HISTORY',
+  'AMORESTORE',
+  'BEAUTYFEED',
   'OTHERS',
 ];
