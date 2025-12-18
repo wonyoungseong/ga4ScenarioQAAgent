@@ -13,6 +13,7 @@
     "test": "ts-node src/cli.ts analyze --url https://betc.co.kr/ecommerceMpaIndex.html --event SELECT_ITEM",
     "test:content-groups": "ts-node src/test-content-groups.ts",
     "test:content-groups:parallel": "ts-node src/test-content-groups-parallel.ts",
+    "test:parameter-prediction": "ts-node src/test-parameter-prediction.ts",
     "load:params": "ts-node src/load-parameter-mapping.ts",
     "load:params:fresh": "ts-node src/load-parameter-mapping.ts --no-cache"
   },

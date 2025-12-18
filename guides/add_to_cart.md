@@ -564,3 +564,148 @@ select_item → view_item → add_to_cart → view_cart → begin_checkout → p
 | Mobile | 스와이프 담기 UI, 퀵카트 버튼 탭 영역 확인 |
 | PC 호버 | 호버 시 나타나는 퀵카트 버튼 클릭 테스트 |
 | 비로그인 | 비로그인 장바구니 지원 여부에 따라 동작 확인 |
+
+---
+
+## 13. 파라미터 값 추출 가이드 (Vision AI)
+
+### 목적
+스크린샷에서 GA4 파라미터 **값(Value)**을 추출하여 실제 dataLayer 값과 비교 검증합니다.
+add_to_cart는 view_item과 유사하지만 **수량(quantity)**이 추가됩니다.
+
+### 추출 대상 파라미터
+
+| 파라미터 | 추출 위치 | 추출 규칙 | 예시 |
+|---------|----------|----------|------|
+| `item_name` | 상품명 영역 | 화면에 표시된 전체 텍스트 | "설화수 자음생크림" |
+| `price` | 가격 표시 영역 | 숫자만 추출 | 180000 |
+| `quantity` | 수량 선택 UI | 선택된 수량 값 | 2 |
+| `item_brand` | 브랜드명 영역 | 텍스트 또는 로고에서 추출 | "설화수" |
+| `item_id` | URL 파라미터 | 상품 코드 | "111070002290" |
+| `item_variant` | 옵션 선택 영역 | 선택된 옵션 값 | "50ml" |
+| `value` | (계산) | price * quantity | 360000 |
+| `currency` | (추론) | 한국 사이트는 KRW | "KRW" |
+
+### 추출 규칙 상세
+
+#### 1) 수량 (`quantity`)
+```
+위치: 수량 선택 UI (장바구니 버튼 근처)
+규칙:
+- 숫자 입력 필드 또는 드롭다운에서 선택된 값
+- +/- 버튼 사이의 숫자
+- 기본값은 1
+
+형태:
+- [ - ] 2 [ + ] → quantity: 2
+- 수량: 1 → quantity: 1
+- Qty: 3 → quantity: 3
+
+확신도 기준:
+- HIGH: 수량 UI에 명확히 표시
+- MEDIUM: 수량 UI가 숨겨져 있거나 옵션과 혼합
+- LOW: 수량 표시 없음 (기본값 1 사용)
+```
+
+#### 2) 옵션/용량 (`item_variant`)
+```
+위치: 옵션 선택 드롭다운 또는 버튼 그룹
+규칙:
+- 선택된 옵션 값 추출
+- 여러 옵션이 있는 경우: "컬러: 레드, 사이즈: M" 형식
+
+예시:
+- 용량: 50ml (선택됨) → "50ml"
+- 색상: [블랙] 핑크 화이트 → "블랙"
+- 사이즈 선택: S [M] L → "M"
+
+확신도 기준:
+- HIGH: 선택된 옵션이 명확히 표시 (선택 상태, 강조 색상)
+- MEDIUM: 옵션이 있지만 선택 상태 불명확
+- LOW: 옵션 UI 없음
+```
+
+#### 3) 총 금액 (`value`)
+```
+위치: 결제 예정 금액 영역 또는 계산
+규칙:
+- 화면에 총액이 표시되면 그 값 사용
+- 표시되지 않으면: price * quantity 계산
+- 할인이 적용된 경우: 할인 후 금액
+
+예시:
+- 상품 가격 180,000원 x 수량 2 → value: 360000
+- 총 결제금액: 360,000원 → value: 360000
+
+확신도 기준:
+- HIGH: 총액이 화면에 명시적으로 표시
+- MEDIUM: 계산으로 도출
+- LOW: 계산 불가 (옵션별 가격 차이 등)
+```
+
+### 상품 목록에서의 퀵 카트 추출
+
+상품 목록 페이지에서 퀵 카트 아이콘 클릭 시:
+
+```
+추출 위치: 상품 카드 내
+주의사항:
+- 상품명이 축약될 수 있음 → 보이는 텍스트까지만 추출
+- 옵션 선택 없이 바로 담기 → item_variant 생략
+- 수량은 기본 1
+
+확신도:
+- 상품 카드 정보 = MEDIUM (축약 가능성)
+- 가격 정보 = HIGH (보통 표시됨)
+```
+
+### Vision AI 프롬프트 예시
+
+```
+[이벤트: add_to_cart]
+[페이지: PRODUCT_DETAIL]
+
+스크린샷을 분석하여 장바구니 담기 시 전송될 파라미터 값을 추출하세요:
+
+1. item_name: 상품명 영역에서 추출
+2. price: 가격 영역에서 숫자만 추출
+3. quantity: 수량 선택 UI에서 선택된 값 (없으면 1)
+4. item_variant: 선택된 옵션 값 (있는 경우)
+5. item_brand: 브랜드명 영역에서 추출
+6. value: 총 금액 (표시되거나 계산)
+
+출력 형식:
+{
+  "eventParams": {
+    "currency": {"value": "KRW", "confidence": "HIGH", "sourceLocation": "추론"},
+    "value": {"value": 360000, "confidence": "HIGH", "sourceLocation": "계산 (180000 x 2)"}
+  },
+  "items": [{
+    "item_name": {"value": "설화수 자음생크림", "confidence": "HIGH", "sourceLocation": "상품명 영역"},
+    "price": {"value": 180000, "confidence": "HIGH", "sourceLocation": "가격 표시 영역"},
+    "quantity": {"value": 2, "confidence": "HIGH", "sourceLocation": "수량 선택 UI"},
+    "item_variant": {"value": "50ml", "confidence": "HIGH", "sourceLocation": "용량 선택 드롭다운"}
+  }]
+}
+```
+
+### 검증 체크리스트
+
+```
+□ item_name이 dataLayer의 item_name과 일치하는지 확인
+□ price가 dataLayer의 price와 일치하는지 확인
+□ quantity가 dataLayer의 quantity와 일치하는지 확인
+□ item_variant가 일치하는지 확인 (옵션 있는 경우)
+□ value = price * quantity 계산이 맞는지 확인
+□ 옵션 변경 시 price 변동 반영 여부 확인
+□ 수량 변경 시 quantity, value 변동 반영 확인
+```
+
+### 불일치 패턴 및 개선
+
+| 불일치 패턴 | 원인 | 개선 방향 |
+|------------|------|----------|
+| quantity 항상 1 | 수량 UI 인식 실패 | 수량 UI 위치 힌트 추가 |
+| item_variant 누락 | 옵션 선택 UI 미인식 | 선택 상태 강조 표시 확인 |
+| price 불일치 | 옵션별 가격 차이 | 선택된 옵션의 가격 추출 |
+| value 불일치 | 할인/쿠폰 적용 | 최종 결제 금액 기준 |

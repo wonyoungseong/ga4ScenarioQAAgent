@@ -9,6 +9,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ScenarioAgent } from './agent';
 import { GA4Client, GA4AdminClient } from './ga4';
+import { GeminiVisionAnalyzer } from './analyzers/visionAnalyzer';
+import {
+  FunnelScenarioDesigner,
+  FunnelScenario,
+  SCENARIO_TEMPLATES,
+} from './scenario/funnelScenarioDesigner';
 
 const program = new Command();
 
@@ -827,6 +833,317 @@ ga4
 
     console.log(chalk.blue('💡 토큰은 ./credentials/ga4_tokens.json에 저장됩니다.'));
     console.log(chalk.yellow('⚠️  Access Token은 1시간 후 만료됩니다. 만료 시 다시 발급하세요.\n'));
+  });
+
+// ========================================
+// Funnel Scenario Commands
+// ========================================
+
+const funnel = program
+  .command('funnel')
+  .description('퍼널 시나리오 분석 관련 명령어');
+
+funnel
+  .command('scenarios')
+  .description('사용 가능한 퍼널 시나리오 템플릿 목록을 표시합니다')
+  .action(() => {
+    console.log(chalk.cyan('\n╔════════════════════════════════════════════════════════════════╗'));
+    console.log(chalk.cyan('║') + chalk.yellow.bold('              📋 퍼널 시나리오 템플릿 목록                      ') + chalk.cyan('║'));
+    console.log(chalk.cyan('╚════════════════════════════════════════════════════════════════╝\n'));
+
+    // 기본 시나리오
+    const defaultScenario = FunnelScenarioDesigner.createDefaultEcommerceFunnel();
+
+    console.log(chalk.yellow('📦 STANDARD_PURCHASE (기본)'));
+    console.log(chalk.gray(`   ${defaultScenario.description}`));
+    console.log(chalk.white(`   단계: ${defaultScenario.steps.map(s => s.eventName).join(' → ')}`));
+    console.log(chalk.gray(`   일관성 규칙:`));
+    console.log(chalk.red(`     🔴 CRITICAL: ${defaultScenario.consistencyRules.immutable.join(', ')}`));
+    console.log(chalk.yellow(`     🟡 WARNING: ${defaultScenario.consistencyRules.recommended.join(', ')}`));
+    console.log(chalk.green(`     🟢 INFO: ${defaultScenario.consistencyRules.allowChange.join(', ')}`));
+
+    console.log('');
+
+    // LIST_TO_PURCHASE 시나리오
+    const listScenario = SCENARIO_TEMPLATES.LIST_TO_PURCHASE;
+    console.log(chalk.yellow('📦 LIST_TO_PURCHASE'));
+    console.log(chalk.gray(`   ${listScenario.description}`));
+    console.log(chalk.white(`   단계: ${listScenario.steps.map(s => s.eventName).join(' → ')}`));
+    console.log(chalk.gray(`   일관성 규칙:`));
+    console.log(chalk.red(`     🔴 CRITICAL: ${listScenario.consistencyRules.immutable.join(', ')}`));
+    console.log(chalk.yellow(`     🟡 WARNING: ${listScenario.consistencyRules.recommended.join(', ')}`));
+    console.log(chalk.green(`     🟢 INFO: ${listScenario.consistencyRules.allowChange.join(', ')}`));
+
+    console.log(chalk.blue('\n💡 사용법:'));
+    console.log(chalk.gray('   npx ts-node src/cli.ts funnel prompt --scenario STANDARD_PURCHASE'));
+    console.log(chalk.gray('   npx ts-node src/cli.ts funnel analyze --screenshots <paths> --scenario STANDARD_PURCHASE'));
+  });
+
+funnel
+  .command('prompt')
+  .description('시나리오 기반 Vision AI 프롬프트를 생성합니다')
+  .option('--scenario <name>', '시나리오 이름 (STANDARD_PURCHASE, LIST_TO_PURCHASE)', 'STANDARD_PURCHASE')
+  .option('--enrich', 'GA4 config로 파라미터 강화', true)
+  .option('-o, --output <file>', '프롬프트를 파일로 저장')
+  .action((options) => {
+    console.log(chalk.cyan('\n╔════════════════════════════════════════════════════════════════╗'));
+    console.log(chalk.cyan('║') + chalk.yellow.bold('              🤖 Vision AI 프롬프트 생성                        ') + chalk.cyan('║'));
+    console.log(chalk.cyan('╚════════════════════════════════════════════════════════════════╝\n'));
+
+    let scenario: FunnelScenario;
+
+    if (options.scenario === 'LIST_TO_PURCHASE') {
+      scenario = SCENARIO_TEMPLATES.LIST_TO_PURCHASE;
+    } else {
+      scenario = FunnelScenarioDesigner.createDefaultEcommerceFunnel();
+    }
+
+    // GA4 config로 강화
+    if (options.enrich) {
+      scenario = FunnelScenarioDesigner.enrichScenarioWithGA4Config(scenario);
+      console.log(chalk.gray('✓ GA4 config로 파라미터 강화됨\n'));
+    }
+
+    const prompt = FunnelScenarioDesigner.generateVisionPromptForScenario(scenario);
+
+    console.log(prompt);
+
+    if (options.output) {
+      fs.writeFileSync(options.output, prompt, 'utf-8');
+      console.log(chalk.green(`\n✅ 프롬프트 저장됨: ${options.output}`));
+    }
+  });
+
+funnel
+  .command('checklist')
+  .description('시나리오 검증 체크리스트를 생성합니다')
+  .option('--scenario <name>', '시나리오 이름', 'STANDARD_PURCHASE')
+  .option('-o, --output <file>', '체크리스트를 파일로 저장')
+  .action((options) => {
+    console.log(chalk.cyan('\n╔════════════════════════════════════════════════════════════════╗'));
+    console.log(chalk.cyan('║') + chalk.yellow.bold('              ✅ 검증 체크리스트 생성                           ') + chalk.cyan('║'));
+    console.log(chalk.cyan('╚════════════════════════════════════════════════════════════════╝\n'));
+
+    let scenario: FunnelScenario;
+
+    if (options.scenario === 'LIST_TO_PURCHASE') {
+      scenario = SCENARIO_TEMPLATES.LIST_TO_PURCHASE;
+    } else {
+      scenario = FunnelScenarioDesigner.createDefaultEcommerceFunnel();
+    }
+
+    scenario = FunnelScenarioDesigner.enrichScenarioWithGA4Config(scenario);
+
+    const checklist = FunnelScenarioDesigner.generateValidationChecklist(scenario);
+
+    console.log(checklist);
+
+    if (options.output) {
+      fs.writeFileSync(options.output, checklist, 'utf-8');
+      console.log(chalk.green(`\n✅ 체크리스트 저장됨: ${options.output}`));
+    }
+  });
+
+funnel
+  .command('analyze')
+  .description('스크린샷들을 분석하여 퍼널 일관성을 검증합니다')
+  .requiredOption('--screenshots <paths>', '스크린샷 경로들 (쉼표 구분, 퍼널 순서대로)')
+  .requiredOption('--urls <urls>', '각 스크린샷의 페이지 URL (쉼표 구분)')
+  .option('--scenario <name>', '시나리오 이름', 'STANDARD_PURCHASE')
+  .option('-k, --api-key <key>', 'Gemini API 키 (또는 GEMINI_API_KEY 환경변수)')
+  .option('-o, --output <dir>', '결과 출력 디렉토리', './output/funnel')
+  .action(async (options) => {
+    console.log(chalk.cyan('\n╔════════════════════════════════════════════════════════════════╗'));
+    console.log(chalk.cyan('║') + chalk.yellow.bold('              🔍 퍼널 시나리오 분석                             ') + chalk.cyan('║'));
+    console.log(chalk.cyan('╚════════════════════════════════════════════════════════════════╝\n'));
+
+    const apiKey = options.apiKey || process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.error(chalk.red('❌ Gemini API 키가 필요합니다.'));
+      console.error(chalk.gray('   -k 옵션 또는 GEMINI_API_KEY 환경변수를 설정하세요.'));
+      process.exit(1);
+    }
+
+    const screenshotPaths = options.screenshots.split(',').map((s: string) => s.trim());
+    const urls = options.urls.split(',').map((u: string) => u.trim());
+
+    if (screenshotPaths.length !== urls.length) {
+      console.error(chalk.red('❌ 스크린샷 수와 URL 수가 일치하지 않습니다.'));
+      process.exit(1);
+    }
+
+    // 스크린샷 파일 확인
+    for (const screenshotPath of screenshotPaths) {
+      if (!fs.existsSync(screenshotPath)) {
+        console.error(chalk.red(`❌ 스크린샷 파일을 찾을 수 없습니다: ${screenshotPath}`));
+        process.exit(1);
+      }
+    }
+
+    // 시나리오 선택
+    let scenario: FunnelScenario;
+    if (options.scenario === 'LIST_TO_PURCHASE') {
+      scenario = SCENARIO_TEMPLATES.LIST_TO_PURCHASE;
+    } else {
+      scenario = FunnelScenarioDesigner.createDefaultEcommerceFunnel();
+    }
+
+    scenario = FunnelScenarioDesigner.enrichScenarioWithGA4Config(scenario);
+
+    // 스크린샷 수와 시나리오 단계 수 확인
+    if (screenshotPaths.length !== scenario.steps.length) {
+      console.error(chalk.red(`❌ 스크린샷 수(${screenshotPaths.length})와 시나리오 단계 수(${scenario.steps.length})가 일치하지 않습니다.`));
+      console.error(chalk.gray(`   시나리오 단계: ${scenario.steps.map(s => s.eventName).join(' → ')}`));
+      process.exit(1);
+    }
+
+    console.log(chalk.gray(`시나리오: ${scenario.name}`));
+    console.log(chalk.gray(`단계: ${scenario.steps.map(s => s.eventName).join(' → ')}`));
+    console.log(chalk.gray(`스크린샷: ${screenshotPaths.length}개\n`));
+
+    try {
+      const analyzer = new GeminiVisionAnalyzer(apiKey);
+
+      const screenshots = screenshotPaths.map((p: string, i: number) => ({
+        path: p,
+        pageUrl: urls[i],
+      }));
+
+      const result = await analyzer.analyzeFunnelScenario(screenshots, scenario);
+
+      // 결과 출력
+      analyzer.printFunnelAnalysisResult(result);
+
+      // 결과 저장
+      if (!fs.existsSync(options.output)) {
+        fs.mkdirSync(options.output, { recursive: true });
+      }
+
+      const outputPath = path.join(options.output, `funnel_analysis_${Date.now()}.json`);
+
+      // Map을 일반 객체로 변환
+      const resultForJson = {
+        ...result,
+        trackedItems: Array.from(result.trackedItems.entries()).map(([id, item]) => ({
+          item_id: id,
+          valuesByStep: Array.from(item.valuesByStep.entries()),
+          consistencyIssues: item.consistencyIssues,
+        })),
+      };
+
+      fs.writeFileSync(outputPath, JSON.stringify(resultForJson, null, 2));
+      console.log(chalk.green(`\n💾 결과 저장됨: ${outputPath}`));
+
+    } catch (error: any) {
+      console.error(chalk.red(`\n❌ 분석 오류: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+funnel
+  .command('rules')
+  .description('퍼널 일관성 규칙을 상세히 표시합니다')
+  .action(() => {
+    console.log(chalk.cyan('\n╔════════════════════════════════════════════════════════════════╗'));
+    console.log(chalk.cyan('║') + chalk.yellow.bold('              📋 퍼널 일관성 규칙                               ') + chalk.cyan('║'));
+    console.log(chalk.cyan('╚════════════════════════════════════════════════════════════════╝\n'));
+
+    console.log(chalk.red('🔴 CRITICAL (절대 변경 불가)'));
+    console.log(chalk.gray('   변경 시 퍼널 추적이 끊어집니다. 다른 상품으로 인식됩니다.\n'));
+    console.log(chalk.white('   • item_id      - 상품 고유 식별자'));
+    console.log(chalk.white('   • item_name    - 상품명 (전체 퍼널에서 동일해야 추적 가능)'));
+    console.log(chalk.white('   • item_brand   - 브랜드명'));
+
+    console.log('');
+
+    console.log(chalk.yellow('🟡 WARNING (일관성 권장)'));
+    console.log(chalk.gray('   변경 가능하나, 데이터 분석에 혼란을 초래할 수 있습니다.\n'));
+    console.log(chalk.white('   • price        - 할인 적용으로 변경 가능하나 권장하지 않음'));
+    console.log(chalk.white('   • item_category - 카테고리 변경은 분석에 혼란 초래'));
+    console.log(chalk.white('   • item_variant - 옵션 변경 가능하나 기록 필요'));
+
+    console.log('');
+
+    console.log(chalk.green('🟢 INFO (변경 허용)'));
+    console.log(chalk.gray('   정상적인 변경입니다.\n'));
+    console.log(chalk.white('   • quantity     - 수량은 장바구니에서 변경 가능'));
+    console.log(chalk.white('   • discount     - 쿠폰 적용 시 추가됨'));
+    console.log(chalk.white('   • coupon       - 결제 단계에서 적용'));
+    console.log(chalk.white('   • index        - 목록 위치는 페이지마다 다를 수 있음'));
+
+    console.log('');
+
+    console.log(chalk.blue('💡 예시:'));
+    console.log(chalk.gray(`
+   view_item:      item_name = "[설화수] 자음생크림 60ml"
+   add_to_cart:    item_name = "[설화수] 자음생크림 60ml"  ✅ 일치
+   begin_checkout: item_name = "설화수 자음생크림"         ❌ CRITICAL 불일치!
+   purchase:       item_name = "[설화수] 자음생크림 60ml"  ✅ 일치
+
+   → begin_checkout 단계에서 item_name 불일치 발생
+   → 퍼널 추적이 끊어짐 (3개의 상품으로 분리됨)
+`));
+  });
+
+funnel
+  .command('design')
+  .description('퍼널 시나리오 설계 가이드를 표시합니다')
+  .action(() => {
+    console.log(chalk.cyan('\n╔════════════════════════════════════════════════════════════════╗'));
+    console.log(chalk.cyan('║') + chalk.yellow.bold('              📐 퍼널 시나리오 설계 가이드                      ') + chalk.cyan('║'));
+    console.log(chalk.cyan('╚════════════════════════════════════════════════════════════════╝\n'));
+
+    console.log(chalk.yellow('Step 1: 퍼널 단계 정의'));
+    console.log(chalk.gray('─'.repeat(60)));
+    console.log(chalk.white('   이커머스 표준:'));
+    console.log(chalk.gray('   view_item → add_to_cart → begin_checkout → purchase'));
+    console.log('');
+    console.log(chalk.white('   목록 포함:'));
+    console.log(chalk.gray('   select_item → view_item → add_to_cart → purchase'));
+    console.log('');
+    console.log(chalk.white('   프로모션 포함:'));
+    console.log(chalk.gray('   view_promotion → select_promotion → view_item → add_to_cart → purchase'));
+
+    console.log('');
+
+    console.log(chalk.yellow('Step 2: Vision AI 추출 파라미터 정의'));
+    console.log(chalk.gray('─'.repeat(60)));
+    console.log(chalk.white('   각 페이지에서 추출할 파라미터와 위치 힌트를 정의합니다.'));
+    console.log(chalk.gray(`
+   view_item:
+     - item_name: "상품 제목 영역의 큰 글씨"
+     - price: "현재 판매가 (할인가 우선)"
+     - item_brand: "상품명 위/옆의 브랜드 로고나 텍스트"
+
+   add_to_cart:
+     - item_name: "장바구니 팝업의 상품명"
+     - quantity: "수량 선택 영역의 숫자"
+`));
+
+    console.log(chalk.yellow('Step 3: 일관성 규칙 정의'));
+    console.log(chalk.gray('─'.repeat(60)));
+    console.log(chalk.white('   어떤 파라미터가 퍼널 전체에서 일관되어야 하는지 정의합니다.'));
+    console.log(chalk.gray(`
+   🔴 CRITICAL (변경 불가): item_id, item_name, item_brand
+   🟡 WARNING (권장 일관): price, item_category
+   🟢 INFO (변경 허용): quantity, discount, coupon
+`));
+
+    console.log(chalk.yellow('Step 4: 검증 체크리스트 생성'));
+    console.log(chalk.gray('─'.repeat(60)));
+    console.log(chalk.white('   각 단계에서 확인해야 할 항목을 체크리스트로 생성합니다.'));
+    console.log(chalk.gray(`
+   ☐ view_item의 item_id === add_to_cart의 item_id
+   ☐ view_item의 item_name === add_to_cart의 item_name
+   ☐ add_to_cart의 item_name === begin_checkout의 item_name
+   ...
+`));
+
+    console.log(chalk.blue('\n💡 명령어:'));
+    console.log(chalk.gray('   npx ts-node src/cli.ts funnel scenarios    # 템플릿 목록'));
+    console.log(chalk.gray('   npx ts-node src/cli.ts funnel prompt       # Vision AI 프롬프트'));
+    console.log(chalk.gray('   npx ts-node src/cli.ts funnel checklist    # 검증 체크리스트'));
+    console.log(chalk.gray('   npx ts-node src/cli.ts funnel rules        # 일관성 규칙'));
   });
 
 program.parse();
