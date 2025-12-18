@@ -30,6 +30,12 @@ import {
 } from '../parsers/developmentGuideParser';
 import { GTMPageMappingExtractor, EventPageMapping } from './gtmPageMappingExtractor';
 import { PreloadedGTMConfig, GTMConfigLoader } from '../config/gtmConfigLoader';
+import {
+  getEventParameters,
+  getApiDimension,
+  reloadIfChanged,
+} from '../config/parameterRegistry';
+import { ParameterDefinition } from '../parsers/paramMappingParser';
 
 /**
  * 이벤트 필터링 설정
@@ -364,6 +370,29 @@ export interface IntegratedEventAnalysisResult {
 }
 
 /**
+ * 이벤트 파라미터 정보 (GA4 API 매핑 포함)
+ */
+export interface EventParameterInfo {
+  /** 총 파라미터 수 */
+  total: number;
+  /** GA4 표준 파라미터 수 */
+  standard: number;
+  /** Custom 파라미터 수 (GA4 등록 필요) */
+  custom: number;
+  /** items 배열 포함 여부 */
+  hasItems: boolean;
+  /** 파라미터 상세 목록 */
+  parameters: Array<{
+    ga4Key: string;
+    devGuideVar: string;
+    ga4ApiDimension: string;
+    isCustomDimension: boolean;
+    category: 'common' | 'event' | 'user' | 'item';
+    description: string;
+  }>;
+}
+
+/**
  * 실제 이벤트 발생 가능 결과
  */
 export interface ActualEventResult {
@@ -384,6 +413,8 @@ export interface ActualEventResult {
   category: string;
   /** 사용자 액션 필요 여부 */
   requiresUserAction: boolean;
+  /** 수집 파라미터 정보 (PARAM_MAPPING_TABLE.md 기반) */
+  parameterInfo?: EventParameterInfo;
 }
 
 /**
@@ -453,6 +484,31 @@ export class IntegratedEventAnalyzer {
     }
 
     return analyzer;
+  }
+
+  /**
+   * 이벤트의 파라미터 정보를 조회합니다 (PARAM_MAPPING_TABLE.md 기반)
+   */
+  private getEventParameterInfo(eventName: string): EventParameterInfo | undefined {
+    const params = getEventParameters(eventName);
+    if (!params) {
+      return undefined;
+    }
+
+    return {
+      total: params.summary.total,
+      standard: params.summary.standard,
+      custom: params.summary.custom,
+      hasItems: params.hasItems,
+      parameters: params.parameters.map(p => ({
+        ga4Key: p.ga4Key,
+        devGuideVar: p.devGuideVar,
+        ga4ApiDimension: p.ga4ApiDimension,
+        isCustomDimension: p.isCustomDimension,
+        category: p.category,
+        description: p.description,
+      })),
+    };
   }
 
   /**
@@ -1245,6 +1301,7 @@ export class IntegratedEventAnalyzer {
         selectorVerification: selectorResult,
         category: eventReq?.category || 'unknown',
         requiresUserAction,
+        parameterInfo: this.getEventParameterInfo(gtmEvent.eventName),
       };
 
       // 자동 발생 이벤트는 UI 검증 없이 바로 가능
@@ -1305,6 +1362,7 @@ export class IntegratedEventAnalyzer {
           },
           category: 'ecommerce',
           requiresUserAction: true,
+          parameterInfo: this.getEventParameterInfo('add_to_cart'),
         });
         console.log(`   ✅ [Vision AI 추론] 구매하기 버튼 존재 → add_to_cart 발생 가능 (클릭 후 장바구니 옵션 노출)`);
       }

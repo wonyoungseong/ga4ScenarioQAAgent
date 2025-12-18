@@ -128,6 +128,39 @@ export {
   getCommonVariablesForEvent,
 } from './types/commonVariable';
 
+// Unified Parameter Store (SSOT from PARAM_MAPPING_TABLE.md)
+export {
+  // Types
+  ParameterDefinition,
+  EventParameterConfig,
+  UnifiedParameterStore,
+  // Parser
+  ParamMappingParser,
+  // Query Service
+  ParameterQueryService,
+  // Helper Functions
+  loadParameterStore,
+  getParameterQueryService,
+  getEventParams,
+  getGA4ApiDimension,
+} from './parsers/paramMappingParser';
+
+// Parameter Registry (Agent용 단일 진입점)
+export {
+  initializeParameterRegistry,
+  getEventParameters,
+  getEventParamsBasic,
+  findParameterByKey,
+  findParameterByDevGuideVar,
+  getEventList,
+  getCommonParameters,
+  getApiDimension,
+  reloadIfChanged,
+  forceReload,
+  getRegistryStatus,
+  printRegistrySummary,
+} from './config/parameterRegistry';
+
 // GA4 Parameter Configuration (Standard)
 export {
   // Types

@@ -104,18 +104,18 @@ parameters:
     validation: "Y / N"
 
   # 사용자 정보 변수 (로그인 시에만)
-  - ga4_param: gcid
+  - ga4_param: login_id_gcid
     dev_guide_var: AP_DATA_GCID
-    gtm_variable: "{{JS - GCID}}"
+    gtm_variable: "{{JS - Login ID GCID}}"
     data_type: string
     description: "회원 아이디 SHA512 해싱값"
     example: "aa47d4859ab17bb60a0a28f3a8f2d0..."
     required: true
     note: "비로그인 시 undefined"
 
-  - ga4_param: cid
+  - ga4_param: login_id_cid
     dev_guide_var: AP_DATA_CID
-    gtm_variable: "{{JS - CID}}"
+    gtm_variable: "{{JS - Login ID CID}}"
     data_type: string
     description: "통합 회원번호 SHA512 해싱값"
     example: "f9b7cc17e2c394141a85dfdd332efb..."

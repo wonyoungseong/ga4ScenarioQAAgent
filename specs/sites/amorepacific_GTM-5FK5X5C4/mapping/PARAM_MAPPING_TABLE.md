@@ -40,34 +40,101 @@
 
 ## 공통 변수
 
-### 페이지 정보 변수
+> ⚠️ **GTM 실제 구성 기준** (GT - Event Settings 변수 분석 결과)
 
-| 개발 가이드 변수 | GA4 파라미터 | 설명 | 예시 |
-|----------------|-------------|------|------|
-| `AP_DATA_SITENAME` | site_name | 사이트 이름 | INNISFREE |
-| `AP_DATA_COUNTRY` | country | 국가코드 (ISO 3166-1) | KR |
-| `AP_DATA_LANG` | language | 페이지 언어 (ISO 639-1) | KO |
-| `AP_DATA_ENV` | environment | 개발환경 | PRD |
-| `AP_DATA_CHANNEL` | channel | 접속 채널 | MOBILE |
-| `AP_DATA_BREAD` | breadcrumb | Breadcrumb | 베스트 > 스킨케어 |
-| `AP_DATA_PAGETYPE` | page_type | 페이지 타입 | PRODUCT_DETAIL |
-| `AP_PROMO_ID` | promo_id | 프로모션 ID | 3224 |
-| `AP_PROMO_NAME` | promo_name | 프로모션명 | 신년 세일 |
-| `AP_DATA_ISLOGIN` | is_login | 로그인 여부 | Y / N |
+### 페이지 정보 변수 (Event Parameters)
 
-### 사용자 정보 변수 (로그인 시)
+| 개발 가이드 변수 | GTM Variable | GA4 파라미터 | 설명 | 예시 |
+|----------------|--------------|-------------|------|------|
+| `AP_DATA_SITENAME` | `{{JS - Site Name}}` | site_name | 사이트 이름 | APMALL |
+| `AP_DATA_COUNTRY` | `{{JS - Site Country}}` | site_country | 국가코드 (ISO 3166-1) | KR |
+| `AP_DATA_LANG` | `{{JS - Site Language}}` | site_language | 페이지 언어 (ISO 639-1) | KO |
+| `AP_DATA_ENV` | `{{JS - Site Env}}` | site_env | 개발환경 | PRD |
+| `AP_DATA_CHANNEL` | `{{JS - Channel}}` | channel | 접속 채널 | MOBILE |
+| `AP_DATA_PAGETYPE` | `{{LT - Content Group}}` | content_group | 페이지 타입 (Content Group) | PRODUCT_DETAIL |
+| `AP_DATA_ISLOGIN` | `{{JS - Login Is Login}}` | login_is_login | 로그인 여부 | Y / N |
+| (브라우저) | `{{JS - User Agent}}` | user_agent | User-Agent 문자열 | Mozilla/5.0... |
+| (내부) | `{{JS - Internal Traffic Type}}` | traffic_type | 내부/외부 트래픽 구분 | internal / external |
+| (브라우저) | `{{JS - Page Referrer}}` | page_referrer | 이전 페이지 URL | https://... |
 
-| 개발 가이드 변수 | GA4 파라미터 | 설명 | 예시 |
-|----------------|-------------|------|------|
-| `AP_DATA_GCID` | gcid | 회원ID (SHA512) | aa47d4859ab... |
-| `AP_DATA_CID` | cid | 통합회원번호 (SHA512) | f9b7cc17e2c... |
-| `AP_DATA_ISMEMBER` | is_member | 통합회원 여부 | Y / N |
-| `AP_DATA_CG` | gender | 성별 | F / M |
-| `AP_DATA_CD` | birth_year | 생년 | 1980 |
-| `AP_DATA_LOGINTYPE` | login_type | 로그인 방법 | NORMAL |
-| `AP_DATA_CT` | customer_tier | 회원등급 | WELCOME |
-| `AP_DATA_BEAUTYCT` | beauty_tier | 뷰티포인트 등급 | FAMILY |
-| `AP_DATA_ISEMPLOYEE` | is_employee | 임직원 여부 | Y / N |
+### 페이지 위치 변수 (breadcrumb 대체)
+
+| GTM Variable | GA4 파라미터 | 설명 | 예시 |
+|--------------|-------------|------|------|
+| `{{JS - Page Location 1}}` | page_location_1 | 1뎁스 | 베스트 |
+| `{{JS - Page Location 2}}` | page_location_2 | 2뎁스 | 스킨케어 |
+| `{{JS - Page Location 3}}` | page_location_3 | 3뎁스 | 토너 |
+| `{{JS - Page Location 4}}` | page_location_4 | 4뎁스 | - |
+| `{{JS - Page Location 5}}` | page_location_5 | 5뎁스 | - |
+
+### 사용자 ID 변수 (Event Parameters)
+
+| 개발 가이드 변수 | GTM Variable | GA4 파라미터 | 설명 | 예시 |
+|----------------|--------------|-------------|------|------|
+| `AP_DATA_GCID` | `{{JS - Login Id Gcid}}` | login_id_gcid | 회원ID SHA512 해시 (128자) | aa47d4859ab... |
+| `AP_DATA_CID` | `{{JS - Login Id Cid}}` | login_id_cid | 통합회원번호 SHA512 해시 (128자) | f9b7cc17e2c... |
+| (분할) | `{{JS - Login Id Gcid 1}}` | login_id_gcid_1 | 회원ID 해시 전반부 (64자) | aa47d4859ab... |
+| (분할) | `{{JS - Login Id Gcid 2}}` | login_id_gcid_2 | 회원ID 해시 후반부 (64자) | ...9agkcudj |
+| (분할) | `{{JS - Login Id Cid 1}}` | login_id_cid_1 | 통합회원번호 해시 전반부 (64자) | f9b7cc17e2c... |
+| (분할) | `{{JS - Login Id Cid 2}}` | login_id_cid_2 | 통합회원번호 해시 후반부 (64자) | ...4kkc9fl4 |
+
+> ℹ️ GA4 Custom Dimension은 최대 100자 제한이 있어 128자 해시를 2개로 분할하여 전송
+
+### 사용자 속성 변수 (User Properties)
+
+| 개발 가이드 변수 | GTM Variable | GA4 User Property | 설명 | 예시 |
+|----------------|--------------|-------------------|------|------|
+| `AP_DATA_GCID` | `{{JS - Login Id Gcid}}` | user_id | 사용자 식별자 | aa47d4859ab... |
+| `AP_DATA_ISSSO` | `{{JS - Login Is SSO}}` | login_is_sso | SSO 로그인 여부 | Y / N |
+| `AP_DATA_CG` | `{{JS - Login Gender}}` | login_gender | 성별 | F / M |
+| `AP_DATA_CD` | `{{JS - Login Birth (year)}}` | login_birth | 생년 | 1980 |
+| `AP_DATA_AGE` | `{{JS - Login Age}}` | login_age | 연령대 | 30 |
+| `AP_DATA_CT` | `{{JS - Login Level (internal)}}` | login_level | 회원등급 (내부) | WELCOME |
+| `AP_DATA_BEAUTYCT` | `{{JS - Login Beauty Level}}` | login_beauty_level | 뷰티포인트 등급 | FAMILY |
+| `AP_DATA_ISEMPLOYEE` | `{{JS - Login is Member (employee)}}` | login_is_member | 임직원 여부 | Y / N |
+| `AP_DATA_LOGINTYPE` | `{{JS - Login Method}}` | login_method | 로그인 방법 | NORMAL / KAKAO |
+| `AP_DATA_ISSUBSCRIPTION` | `{{JS - Login Is Subscription}}` | login_is_subscription | 정기배송 구독 여부 | Y / N |
+
+### 조건부 파라미터 (content_group 기반)
+
+#### PRODUCT_DETAIL 페이지 전용
+
+| GTM Variable | GA4 파라미터 | 설명 |
+|--------------|-------------|------|
+| `{{JS - Product Id with View Item}}` | product_id | 상품 ID |
+| `{{JS - Product Name with View Item}}` | product_name | 상품명 |
+| `{{JS - Product Category with View Item}}` | product_category | 상품 카테고리 |
+| `{{JS - Product Brandname with View Item}}` | product_brandname | 브랜드명 |
+| `{{JS - Product Brandcode with View Item}}` | product_brandcode | 브랜드 코드 |
+| `{{JS - Product Is Stock with View Item}}` | product_is_stock | 재고 여부 |
+
+#### EVENT_DETAIL 페이지 전용
+
+| GTM Variable | GA4 파라미터 | 설명 |
+|--------------|-------------|------|
+| `{{JS - Promotion Code on Detail Page}}` | view_event_code | 이벤트/프로모션 코드 |
+| `{{JS - Promotion Name on Detail Page}}` | view_event_name | 이벤트/프로모션명 |
+
+#### BRAND_MAIN 페이지 전용
+
+| GTM Variable | GA4 파라미터 | 설명 |
+|--------------|-------------|------|
+| `{{JS - Brandshop Code}}` | brandshop_code | 브랜드샵 코드 |
+| `{{JS - Brandshop Name}}` | brandshop_name | 브랜드샵명 |
+
+#### 매장 관련 페이지 전용
+
+| GTM Variable | GA4 파라미터 | 설명 |
+|--------------|-------------|------|
+| `{{JS - Store Code from URL}}` | page_store_code | 매장 코드 |
+| `{{JS - Store Name from URL}}` | page_store_name | 매장명 |
+
+#### SEARCH_RESULT 페이지 전용
+
+| GTM Variable | GA4 파라미터 | 설명 |
+|--------------|-------------|------|
+| `{{JS - Search Brandshop Code}}` | search_brand_code | 검색 브랜드 코드 |
+| `{{JS - Search Brandshop Name}}` | search_brand | 검색 브랜드명 |
 
 ---
 
@@ -255,9 +322,9 @@
 |----------------|--------------|-------------|------|
 | `AP_PROMO_ID` | `{{JS - Promo ID}}` | promotion_id | 프로모션 ID |
 | `AP_PROMO_NAME` | `{{JS - Promo Name}}` | promotion_name | 프로모션 이름 |
-| `AP_DATA_PAGETYPE` | `{{JS - Page Type}}` | page_type | 페이지 타입 (EVENT_DETAIL) |
+| `AP_DATA_PAGETYPE` | `{{JS - Content Group}}` | content_group | 페이지 타입 (EVENT_DETAIL) |
 
-**트리거**: `AP_DATA_PAGETYPE === 'EVENT_DETAIL'` 조건
+**트리거**: `AP_DATA_PAGETYPE === 'EVENT_DETAIL'` 조건 (content_group = EVENT_DETAIL)
 
 ---
 
@@ -268,9 +335,12 @@
 | 개발 가이드 변수 | GTM Variable | GA4 파라미터 | 설명 |
 |----------------|--------------|-------------|------|
 | `AP_DATA_SITENAME` | `{{JS - Site Name}}` | site_name | 사이트 이름 |
-| `AP_DATA_PAGETYPE` | `{{JS - Page Type}}` | page_type | 페이지 타입 |
+| `AP_DATA_COUNTRY` | `{{JS - Site Country}}` | site_country | 국가코드 |
+| `AP_DATA_LANG` | `{{JS - Site Language}}` | site_language | 페이지 언어 |
+| `AP_DATA_ENV` | `{{JS - Site Env}}` | site_env | 개발환경 |
+| `AP_DATA_PAGETYPE` | `{{JS - Content Group}}` | content_group | 페이지 타입 (Content Group) |
 | `AP_DATA_BREAD` | `{{JS - Breadcrumb}}` | breadcrumb | Breadcrumb |
-| `AP_DATA_ISLOGIN` | `{{JS - Is Login}}` | is_login | 로그인 여부 |
+| `AP_DATA_ISLOGIN` | `{{JS - Login Is Login}}` | login_is_login | 로그인 여부 |
 | `AP_DATA_CHANNEL` | `{{JS - Channel}}` | channel | 접속 채널 |
 
 **dataLayer event**: `ap_page_view`
@@ -417,7 +487,7 @@
 | view_promotion | - | `{{DL - Promotion ID}}`, `{{DL - Promotion Name}}` |
 | select_promotion | `{{JS - Select Promotion DataLayer}}` | - |
 | view_promotion_detail | - | `{{JS - Promo ID}}`, `{{JS - Promo Name}}` |
-| page_view | - | `{{JS - Site Name}}`, `{{JS - Page Type}}` |
+| page_view | - | `{{JS - Site Name}}`, `{{JS - Content Group}}` |
 | login | - | `{{DL - Event Label with customEvent}}`, `{{JS - Event Time KST}}` |
 | sign_up | - | `{{DL - Event Label with customEvent}}`, `{{JS - Event Time KST}}` |
 | withdrawal | - | `{{DL - Event Label with customEvent}}`, `{{JS - Event Time KST}}` |
@@ -472,4 +542,4 @@ MAIN         - 메인 페이지
 
 ---
 
-*최종 수정: 2024-12-15 (21개 이벤트 반영)*
+*최종 수정: 2024-12-18 (GA4 파라미터명 실제 GTM 설정과 동기화: page_type→content_group, country→site_country, language→site_language, environment→site_env, is_login→login_is_login)*

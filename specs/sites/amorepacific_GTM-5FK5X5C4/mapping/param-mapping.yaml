@@ -84,14 +84,14 @@ common_variables:
 
   user_info:
     - dev_guide_var: AP_DATA_GCID
-      ga4_param: gcid
+      ga4_param: login_id_gcid
       description: "회원 아이디 SHA512 해싱값"
       example: "aa47d4859ab17bb60a0a28f3a8f2d0..."
       required: true
       note: "비로그인 시 undefined"
 
     - dev_guide_var: AP_DATA_CID
-      ga4_param: cid
+      ga4_param: login_id_cid
       description: "통합 회원번호 SHA512 해싱값"
       example: "f9b7cc17e2c394141a85dfdd332efb..."
       required: true
