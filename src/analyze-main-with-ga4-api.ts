@@ -99,18 +99,26 @@ async function main() {
 
   const ga4Values: Record<string, string> = {};
 
-  // 조회할 dimension 목록 (등록된 것만)
+  // 조회할 dimension 목록 (Custom + 표준 Dimension 대체 포함)
   const dimensionsToQuery = [
+    // Custom Dimensions (등록된 것)
     { param: 'site_name', dim: 'customEvent:site_name' },
     { param: 'site_country', dim: 'customEvent:site_country' },
     { param: 'site_language', dim: 'customEvent:site_language' },
     { param: 'site_env', dim: 'customEvent:site_env' },
     { param: 'channel', dim: 'customEvent:channel' },
-    { param: 'content_group', dim: 'contentGroup' },  // 표준 Dimension
     { param: 'login_is_login', dim: 'customEvent:login_is_login' },
     { param: 'user_agent', dim: 'customEvent:user_agent' },
     { param: 'product_id', dim: 'customEvent:product_id' },
     { param: 'product_name', dim: 'customEvent:product_name' },
+    { param: 'product_category', dim: 'customEvent:product_category' },
+    { param: 'product_brandname', dim: 'customEvent:product_brandname' },
+    { param: 'login_id_gcid', dim: 'customEvent:login_id_gcid' },
+    { param: 'login_id_cid', dim: 'customEvent:login_id_cid' },
+    // 표준 Dimension (대체 조회)
+    { param: 'content_group', dim: 'contentGroup' },
+    { param: 'page_referrer', dim: 'pageReferrer' },
+    { param: 'page_location', dim: 'pageLocation' },
   ];
 
   for (const { param, dim } of dimensionsToQuery) {
@@ -222,7 +230,18 @@ async function main() {
     const registered = mapping.isRegistered ? '✅' : (mapping.alternativeDimension ? '🔄' : '❌');
     const expected = EXPECTED[param] || '-';
     const devVal = getDevValue(param);
-    const ga4Val = ga4Values[param] || (mapping.isRegistered ? '(조회 필요)' : '(미등록)');
+
+    // GA4 값 결정: 직접 조회 > 표준 Dimension 대체 > 미등록
+    let ga4Val = ga4Values[param];
+    if (!ga4Val && mapping.alternativeDimension) {
+      // 표준 Dimension 대체값 사용
+      if (param === 'content_group') ga4Val = ga4Values['content_group'];
+      else if (param === 'page_referrer') ga4Val = ga4Values['page_referrer'];
+      else if (param.startsWith('page_location_')) ga4Val = ga4Values['page_location'];
+    }
+    if (!ga4Val) {
+      ga4Val = mapping.isRegistered ? '(조회 필요)' : (mapping.alternativeDimension ? '(표준 Dim)' : '(미등록)');
+    }
 
     const displayDev = devVal.length > 20 ? devVal.substring(0, 17) + '...' : devVal;
     const displayGa4 = ga4Val.length > 20 ? ga4Val.substring(0, 17) + '...' : ga4Val;

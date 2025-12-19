@@ -23,6 +23,8 @@ export interface GA4MappingResult {
   scope: 'event' | 'user' | 'item' | null;
   uiName: string | null;
   alternativeDimension?: string;  // 표준 Dimension으로 대체 가능한 경우
+  queryDimension: string | null;  // 실제 조회에 사용할 dimension (Custom 또는 표준)
+  queryable: boolean;             // API 조회 가능 여부
 }
 
 export interface GA4RegistryState {
@@ -166,6 +168,7 @@ export async function initializeGA4DimensionRegistry(options: {
 
 /**
  * GTM 파라미터의 GA4 등록 상태 확인
+ * queryDimension: 실제 API 조회에 사용할 dimension (Custom 우선, 없으면 표준 대체)
  */
 export function checkParameterMapping(
   paramName: string,
@@ -177,6 +180,8 @@ export function checkParameterMapping(
     isRegistered: false,
     scope: null,
     uiName: null,
+    queryDimension: null,
+    queryable: false,
   };
 
   // 표준 Dimension 대체 확인
@@ -200,6 +205,12 @@ export function checkParameterMapping(
     result.isRegistered = true;
     result.scope = dimInfo.scope;
     result.uiName = dimInfo.uiName;
+    result.queryDimension = dimInfo.apiName;  // Custom Dimension 사용
+    result.queryable = true;
+  } else if (result.alternativeDimension) {
+    // Custom이 없으면 표준 Dimension 대체 사용
+    result.queryDimension = result.alternativeDimension;
+    result.queryable = true;
   }
 
   return result;
@@ -424,6 +435,69 @@ export function getAllRegisteredDimensions(): {
     event: Array.from(state.eventDimensions.values()),
     user: Array.from(state.userDimensions.values()),
     item: Array.from(state.itemDimensions.values()),
+  };
+}
+
+/**
+ * 조회 가능한 모든 파라미터의 쿼리 설정 생성
+ * 새 사이트 설정 시 이 함수로 자동 쿼리 설정 생성
+ */
+export function generateQueryConfig(
+  mappings: GA4MappingResult[]
+): Array<{
+  param: string;
+  dimension: string;
+  source: 'custom' | 'standard' | 'none';
+}> {
+  const config: Array<{
+    param: string;
+    dimension: string;
+    source: 'custom' | 'standard' | 'none';
+  }> = [];
+
+  for (const mapping of mappings) {
+    if (mapping.queryable && mapping.queryDimension) {
+      config.push({
+        param: mapping.gtmParam,
+        dimension: mapping.queryDimension,
+        source: mapping.isRegistered ? 'custom' : 'standard',
+      });
+    } else {
+      config.push({
+        param: mapping.gtmParam,
+        dimension: '',
+        source: 'none',
+      });
+    }
+  }
+
+  return config;
+}
+
+/**
+ * 전체 매핑 결과에서 조회 가능/불가능 요약 생성
+ */
+export function getQueryabilitySummary(mappings: GA4MappingResult[]): {
+  total: number;
+  queryable: number;
+  notQueryable: number;
+  customDimension: number;
+  standardAlternative: number;
+  queryableRate: number;
+  queryConfig: Array<{ param: string; dimension: string; source: string }>;
+} {
+  const queryable = mappings.filter(m => m.queryable).length;
+  const customDimension = mappings.filter(m => m.isRegistered).length;
+  const standardAlternative = mappings.filter(m => !m.isRegistered && m.alternativeDimension).length;
+
+  return {
+    total: mappings.length,
+    queryable,
+    notQueryable: mappings.length - queryable,
+    customDimension,
+    standardAlternative,
+    queryableRate: (queryable / mappings.length) * 100,
+    queryConfig: generateQueryConfig(mappings),
   };
 }
 
