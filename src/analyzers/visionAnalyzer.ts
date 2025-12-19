@@ -1269,4 +1269,428 @@ URL: ${pageUrl}
     console.log(`📊 전체 결과: ${result.overallConsistency.summary}`);
     console.log('═'.repeat(70));
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 페이지 변수 예측 (Vision AI 기반)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Vision AI가 스크린샷을 보고 페이지 타입과 변수를 즉시 예측
+   *
+   * 3단계 흐름:
+   * 1. 화면 보고 → 페이지 타입 판단
+   * 2. 페이지 타입에 따라 → 변수 예측
+   * 3. 페이지 타입에 따라 → 이벤트 예측
+   */
+  async predictPageVariables(
+    screenshotPath: string,
+    pageUrl: string,
+    options?: {
+      viewport?: { width: number; height: number };
+      userAgent?: string;
+    }
+  ): Promise<PageVariablePrediction> {
+    const imageBase64 = await this.imageToBase64(screenshotPath);
+    const mimeType = this.getMimeType(screenshotPath);
+
+    // 예측 규칙 로드
+    const rulesPath = path.join(process.cwd(), 'config', 'vision-prediction-rules.json');
+    let rules: any = {};
+    try {
+      rules = JSON.parse(fs.readFileSync(rulesPath, 'utf-8'));
+    } catch (e) {
+      console.warn('vision-prediction-rules.json 로드 실패, 기본값 사용');
+    }
+
+    // URL에서 도메인 추출
+    const urlDomain = (() => {
+      try {
+        return new URL(pageUrl).hostname.replace('www.', '');
+      } catch {
+        return '';
+      }
+    })();
+
+    // site_name 매핑
+    const siteNameMap: Record<string, string> = {
+      'amoremall.com': 'APMALL',
+      'innisfree.com': 'INNISFREE',
+      'osulloc.com': 'OSULLOC',
+      'illiyoon.com': 'ILLIYOON',
+      'aritaum.com': 'ARITAUM',
+      'espoir.com': 'ESPOIR',
+      'laboh.co.kr': 'LABOH',
+      'aestura.com': 'AESTURA',
+      'brdy.co.kr': 'BRDY',
+      'ayunche.com': 'AYUNCHE',
+      'amospro.com': 'AMOSPRO',
+      'makeonshop.co.kr': 'MAKEON',
+    };
+    const expectedSiteName = siteNameMap[urlDomain] || urlDomain.split('.')[0].toUpperCase();
+
+    // channel 판단 (User-Agent/viewport 기반)
+    // viewport가 전달되면 그것으로 판단, 아니면 화면에서 판단
+    let expectedChannel: string;
+    if (options?.viewport) {
+      // viewport 기반 판단 (테스트 환경)
+      expectedChannel = options.viewport.width >= 1024 ? 'PC' : 'MO';
+    } else {
+      // 화면 레이아웃에서 직접 판단
+      expectedChannel = 'DETECT_FROM_SCREENSHOT';
+    }
+
+    // site_country, site_language 추출
+    // 1. URL에서 /kr/ko/ 패턴 확인
+    // 2. URL에 없으면 html lang 속성 기준
+    // 3. INT 사이트: URL에 /int/ + 영어 → 국가 GL
+    const countryMatch = pageUrl.match(/\/([a-z]{2})\/[a-z]{2}\//i);
+    const langMatch = pageUrl.match(/\/[a-z]{2}\/([a-z]{2})\//i);
+    const isIntSite = /\/int\//i.test(pageUrl);
+
+    let expectedCountry: string;
+    let expectedLanguage: string;
+
+    if (countryMatch && langMatch) {
+      // URL에 국가/언어 패턴이 있는 경우
+      expectedCountry = countryMatch[1].toUpperCase();
+      expectedLanguage = `${langMatch[1].toLowerCase()}-${expectedCountry}`;
+    } else if (isIntSite) {
+      // INT 사이트 (글로벌)
+      expectedCountry = 'GL';
+      expectedLanguage = 'en-GL';
+    } else {
+      // URL에 없으면 html lang에서 추출하도록 Vision AI에 위임
+      expectedCountry = 'DETECT_FROM_HTML_LANG';
+      expectedLanguage = 'DETECT_FROM_HTML_LANG';
+    }
+
+    // site_env 판단 (URL 패턴)
+    const expectedEnv = (() => {
+      if (/\b(dev|develop)\b/i.test(pageUrl)) return 'DEV';
+      if (/\b(stg|staging)\b/i.test(pageUrl)) return 'STG';
+      if (/\blocalhost\b/i.test(pageUrl)) return 'LOCAL';
+      return 'PRD';
+    })();
+
+    const systemPrompt = `당신은 웹 페이지 분석 전문가입니다.
+스크린샷을 보고 즉시 페이지 타입과 GA4 변수 값을 예측합니다.
+
+## 핵심 규칙 (반드시 준수)
+
+### 1. 공통 변수 결정 규칙 (7개)
+
+**site_name** = "${expectedSiteName}" (도메인 매핑, 고정)
+
+**site_env** = "${expectedEnv}" (URL 패턴 기반, dev/stg/local → DEV/STG/LOCAL, 기본값 PRD)
+
+**site_country / site_language**:
+${expectedCountry === 'DETECT_FROM_HTML_LANG' ?
+`- URL에 국가/언어 패턴 없음 → html lang 속성에서 추출
+- html lang="ko" → site_country=KR, site_language=ko-KR
+- html lang="en" → site_country=US, site_language=en-US (단, URL에 /int/ 있으면 GL)
+- html lang="ja" → site_country=JP, site_language=ja-JP
+- html lang="zh" → site_country=CN, site_language=zh-CN` :
+`- site_country = "${expectedCountry}" (URL에서 추출)
+- site_language = "${expectedLanguage}" (URL에서 추출)`}
+
+**channel**:
+${expectedChannel !== 'DETECT_FROM_SCREENSHOT'
+  ? `= "${expectedChannel}" (viewport ${options?.viewport?.width}x${options?.viewport?.height} 기반, 고정값)`
+  : `(화면 레이아웃 기반 판단)
+- PC: 넓은 데스크톱 레이아웃, 상단 전체 메뉴 펼침, 다단 컬럼
+- MO: 모바일 레이아웃, 햄버거 메뉴(≡), 하단 고정 탭바, 전체 너비 사용`}
+
+### 2. 페이지 위치 변수 (URL 100자 분할, 5개)
+**중요**: page_location은 breadcrumb이 아니라 full URL을 100자 단위로 분할한 값입니다.
+GA4 Custom Dimension 100자 제한으로 인해 URL이 잘리면 데이터 오류가 발생하므로 분할 저장합니다.
+
+- page_location_1: URL의 1~100자
+- page_location_2: URL의 101~200자 (없으면 null)
+- page_location_3: URL의 201~300자 (없으면 null)
+- page_location_4: URL의 301~400자 (없으면 null)
+- page_location_5: URL의 401~500자 (없으면 null)
+
+예시: URL이 "https://www.amoremall.com/kr/ko/product/detail?onlineProdCode=12345" (68자)
+→ page_location_1 = 전체 URL, page_location_2~5 = null
+
+### 3. 페이지 타입 판단 우선순위
+${JSON.stringify(rules.step1_pageType?.priority_rules || [], null, 2)}
+
+페이지 타입 기준:
+${JSON.stringify(rules.step1_pageType?.rules || {}, null, 2)}
+
+### 4. 조건부 변수 (페이지 타입별 추가 파라미터)
+
+**PRODUCT_DETAIL** 페이지일 때 (10개):
+- product_id: URL 쿼리스트링에서 추출 (우선순위: onlineProdCode > onlineProdSn > product_no > productId > /product/숫자)
+- product_name: 화면의 큰 상품명 텍스트
+- product_brandname: 상품명 위/옆의 브랜드명
+- product_brandcode: 브랜드 코드 (URL 또는 화면에서 확인, 없으면 null)
+- product_category: 브레드크럼 또는 카테고리 표시
+- product_price: 판매가 (숫자만, 예: 45000)
+- product_prdprice: 정가/원가 (할인 전 가격, 숫자만)
+- product_discount: 할인 금액 (숫자만)
+- product_is_stock: 재고 여부 (Y/N) - 구매버튼 활성화=Y, 품절=N
+- product_apg_brand_code: APG 브랜드 코드 (없으면 null)
+
+**EVENT_DETAIL** 페이지일 때 (2개):
+- view_event_code: URL에서 이벤트 ID 추출 (/event/123 → "123")
+- view_event_name: 이벤트 배너/제목 텍스트
+
+**BRAND_MAIN** 페이지일 때 (2개):
+- brandshop_code: URL에서 브랜드 코드 추출
+- brandshop_name: 브랜드 로고/이름 텍스트
+
+**STORE 페이지일 때 (2개)** (매장 정보 페이지):
+- page_store_code: URL에서 매장 코드 추출
+- page_store_name: 화면에서 매장명
+
+**SEARCH_RESULT** 페이지일 때 (6개):
+- search_term: 검색창에 표시된 검색어
+- search_result: 검색 결과 있음 → "Y", 없음 → "N"
+- search_result_count: "총 123개" 같은 결과 개수 (숫자만)
+- search_type: 검색 유형 (일반검색, 브랜드검색 등)
+- search_brand_code: 필터에서 선택된 브랜드 코드 (없으면 null)
+- search_brand: 필터에서 선택된 브랜드명 (없으면 null)
+
+**CART** 페이지일 때 (3개):
+- cart_item_count: 장바구니에 담긴 상품 수
+- cart_total_price: 총 결제 예정 금액 (숫자만)
+- checkout_step: begin_checkout 이벤트 파라미터
+  - 1: 장바구니 페이지 랜딩 (CART 페이지 진입 시)
+  - 2: 바로구매 버튼 클릭 시 (상품상세/장바구니 카드의 바로구매)
+
+**ORDER** 페이지일 때 (3개):
+- checkout_step: begin_checkout 이벤트 파라미터
+  - 3: 체크아웃(주문서) 페이지 진입 시
+  - 4: 체크아웃 페이지 내 결제하기/구매하기 버튼 클릭 시
+- payment_type: 선택된 결제 방법 (카드, 무통장 등, 아직 선택 안했으면 null)
+- coupon_name: 적용된 쿠폰명 (없으면 null)
+
+**ORDER_COMPLETE** 페이지일 때 (5개):
+- transaction_id: 주문번호
+- transaction_value: 결제 금액 (숫자만)
+- transaction_shipping: 배송비 (숫자만, 무료배송=0)
+- coupon_code: 사용된 쿠폰 코드 (없으면 null)
+- payment_type: 결제 방법
+
+## 이벤트 예측
+페이지 타입별 자동 발생 이벤트:
+${JSON.stringify(rules.step3_events?.autoFire || {}, null, 2)}
+
+발생하면 안 되는 이벤트:
+${JSON.stringify(rules.step3_events?.forbidden || {}, null, 2)}`;
+
+    const userPrompt = `## 분석할 페이지
+URL: ${pageUrl}
+
+## 고정값
+- site_name: "${expectedSiteName}"
+- site_env: "${expectedEnv}"
+${expectedCountry !== 'DETECT_FROM_HTML_LANG' ? `- site_country: "${expectedCountry}"
+- site_language: "${expectedLanguage}"` : ''}
+${expectedChannel !== 'DETECT_FROM_SCREENSHOT' ? `- channel: "${expectedChannel}"` : ''}
+
+## 요청
+스크린샷을 분석하여 다음 JSON 형식으로 응답하세요 (전체 45개+ 파라미터 지원):
+
+\`\`\`json
+{
+  "pageType": "MAIN|PRODUCT_DETAIL|PRODUCT_LIST|SEARCH_RESULT|CART|ORDER|ORDER_COMPLETE|EVENT_DETAIL|BRAND_MAIN|MY|STORE 중 하나",
+  "confidence": "high|medium|low",
+  "variables": {
+    "site_name": "${expectedSiteName}",
+    "site_country": "${expectedCountry !== 'DETECT_FROM_HTML_LANG' ? expectedCountry : 'html lang 기반 추출'}",
+    "site_language": "${expectedLanguage !== 'DETECT_FROM_HTML_LANG' ? expectedLanguage : 'html lang 기반 추출'}",
+    "site_env": "${expectedEnv}",
+    "channel": "${expectedChannel !== 'DETECT_FROM_SCREENSHOT' ? expectedChannel : 'PC 또는 MO'}",
+    "content_group": "pageType과 동일",
+    "login_is_login": "N 또는 Y"
+  },
+  "pageLocationVariables": {
+    "page_location_1": "breadcrumb 1뎁스 또는 null",
+    "page_location_2": "breadcrumb 2뎁스 또는 null",
+    "page_location_3": "breadcrumb 3뎁스 또는 null",
+    "page_location_4": "breadcrumb 4뎁스 또는 null",
+    "page_location_5": "breadcrumb 5뎁스 또는 null"
+  },
+  "conditionalVariables": {
+    "// 페이지 타입별 변수 - 아래 예시 참조": ""
+  },
+  "events": {
+    "autoFire": ["페이지 타입별 자동 이벤트"],
+    "conditional": [],
+    "forbidden": ["페이지 타입별 금지 이벤트"]
+  },
+  "reasoning": "판단 근거"
+}
+\`\`\`
+
+## conditionalVariables 페이지 타입별 필수 파라미터
+
+**PRODUCT_DETAIL**: product_id, product_name, product_brandname, product_brandcode, product_category, product_price, product_prdprice, product_discount, product_is_stock, product_apg_brand_code
+
+**SEARCH_RESULT**: search_term, search_result, search_result_count, search_type, search_brand_code, search_brand
+
+**CART**: cart_item_count, cart_total_price
+
+**ORDER**: checkout_step, payment_type, coupon_name
+
+**ORDER_COMPLETE**: transaction_id, transaction_value, transaction_shipping, coupon_code, payment_type
+
+**EVENT_DETAIL**: view_event_code, view_event_name
+
+**BRAND_MAIN**: brandshop_code, brandshop_name
+
+**STORE**: page_store_code, page_store_name
+
+## 중요
+1. site_name, site_env, channel은 위에서 지정한 고정값 그대로 사용
+2. 페이지 타입은 팝업을 무시하고 메인 콘텐츠로 판단
+3. 이벤트 팝업이 있어도 배경이 메인 페이지면 MAIN
+4. **pageLocationVariables는 breadcrumb이 보일 때만 채우세요** (없으면 모두 null)
+5. **conditionalVariables는 해당 페이지 타입의 모든 파라미터를 채우세요**
+   - 화면에서 확인 가능한 값은 실제 값
+   - 확인 불가능하면 null
+   - 숫자 파라미터는 숫자만 (예: 45000, 쉼표/원 제외)
+6. **product_id, view_event_code 등은 URL에서 추출 가능한 경우 반드시 추출**`;
+
+    try {
+      const result = await this.model.generateContent([
+        {
+          inlineData: {
+            mimeType,
+            data: imageBase64,
+          },
+        },
+        { text: systemPrompt + '\n\n' + userPrompt },
+      ]);
+
+      const response = result.response;
+      const text = response.text();
+
+      // JSON 파싱
+      const jsonMatch = text.match(/```json\n?([\s\S]*?)\n?```/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[1]);
+      }
+
+      // JSON 블록이 없으면 전체 텍스트에서 JSON 찾기
+      const jsonStart = text.indexOf('{');
+      const jsonEnd = text.lastIndexOf('}');
+      if (jsonStart !== -1 && jsonEnd !== -1) {
+        return JSON.parse(text.substring(jsonStart, jsonEnd + 1));
+      }
+
+      throw new Error('응답에서 JSON을 찾을 수 없습니다.');
+    } catch (error: any) {
+      console.error('Vision 변수 예측 오류:', error.message);
+      throw error;
+    }
+  }
+}
+
+/**
+ * Vision AI 페이지 변수 예측 결과 (확장 - 전체 45개+ 파라미터)
+ */
+export interface PageVariablePrediction {
+  /** 판단된 페이지 타입 */
+  pageType: string;
+  /** 판단 확신도 */
+  confidence: 'high' | 'medium' | 'low';
+  /** 기본 변수 예측값 */
+  variables: {
+    // ═══════════════════════════════════════════════════════════
+    // 공통 변수 (7개) - 모든 페이지에서 수집
+    // ═══════════════════════════════════════════════════════════
+    site_name: string;
+    site_country: string;
+    site_language: string;
+    site_env: string;
+    channel: 'PC' | 'MO';
+    content_group: string;
+    login_is_login: 'Y' | 'N';
+  };
+  /** 페이지 위치 변수 (breadcrumb) */
+  pageLocationVariables?: {
+    page_location_1?: string;  // 1뎁스 (예: 베스트)
+    page_location_2?: string;  // 2뎁스 (예: 스킨케어)
+    page_location_3?: string;  // 3뎁스 (예: 토너)
+    page_location_4?: string;  // 4뎁스
+    page_location_5?: string;  // 5뎁스
+  };
+  /** 페이지 타입별 조건부 변수 */
+  conditionalVariables?: {
+    // ═══════════════════════════════════════════════════════════
+    // PRODUCT_DETAIL 전용 (10개)
+    // ═══════════════════════════════════════════════════════════
+    product_id?: string;           // 상품 ID (SKU)
+    product_name?: string;         // 상품명
+    product_category?: string;     // 상품 카테고리
+    product_brandname?: string;    // 브랜드명
+    product_brandcode?: string;    // 브랜드 코드
+    product_is_stock?: string;     // 재고 여부 (Y/N)
+    product_price?: number;        // 판매가 (할인 적용)
+    product_discount?: number;     // 할인 금액
+    product_prdprice?: number;     // 정가 (할인 전)
+    product_apg_brand_code?: string;  // APG 브랜드 코드
+
+    // ═══════════════════════════════════════════════════════════
+    // EVENT_DETAIL 전용 (2개)
+    // ═══════════════════════════════════════════════════════════
+    view_event_code?: string;      // 이벤트/프로모션 코드
+    view_event_name?: string;      // 이벤트/프로모션명
+
+    // ═══════════════════════════════════════════════════════════
+    // BRAND_MAIN 전용 (2개)
+    // ═══════════════════════════════════════════════════════════
+    brandshop_code?: string;       // 브랜드샵 코드
+    brandshop_name?: string;       // 브랜드샵명
+
+    // ═══════════════════════════════════════════════════════════
+    // STORE 페이지 전용 (2개)
+    // ═══════════════════════════════════════════════════════════
+    page_store_code?: string;      // 매장 코드
+    page_store_name?: string;      // 매장명
+
+    // ═══════════════════════════════════════════════════════════
+    // SEARCH_RESULT 전용 (6개)
+    // ═══════════════════════════════════════════════════════════
+    search_brand_code?: string;    // 검색 브랜드 코드
+    search_brand?: string;         // 검색 브랜드명
+    search_term?: string;          // 검색어
+    search_result?: string;        // 검색 성공 여부 (Y/N)
+    search_result_count?: number;  // 검색 결과 개수
+    search_type?: string;          // 검색 유형
+
+    // ═══════════════════════════════════════════════════════════
+    // CART 전용 (3개)
+    // ═══════════════════════════════════════════════════════════
+    cart_item_count?: number;      // 장바구니 상품 수
+    cart_total_price?: number;     // 장바구니 총 금액
+    // checkout_step도 CART에서 사용 (1=장바구니 랜딩, 2=바로구매)
+
+    // ═══════════════════════════════════════════════════════════
+    // ORDER/ORDER_COMPLETE 전용 (8개)
+    // ═══════════════════════════════════════════════════════════
+    checkout_step?: number;        // begin_checkout 파라미터: 1=장바구니랜딩, 2=바로구매, 3=체크아웃페이지, 4=결제버튼
+    payment_type?: string;         // 결제 방법
+    transaction_id?: string;       // 주문번호
+    transaction_value?: number;    // 주문 금액
+    transaction_shipping?: number; // 배송비
+    transaction_tax?: number;      // 세금
+    coupon_name?: string;          // 쿠폰명
+    coupon_code?: string;          // 쿠폰 코드
+
+    // 기타
+    [key: string]: string | number | undefined;
+  };
+  /** 이벤트 예측 */
+  events: {
+    autoFire: string[];
+    conditional: string[];
+    forbidden: string[];
+  };
+  /** 판단 근거 */
+  reasoning: string;
 }

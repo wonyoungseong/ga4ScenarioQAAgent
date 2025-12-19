@@ -197,3 +197,13 @@ export {
   getCrawlableParameters,
   getGTMMappedParameters,
 } from './config/ga4ParameterConfig';
+
+// Value Predictor (page_view 파라미터 값 예측)
+export {
+  ValuePredictor,
+  PredictionContext,
+  PredictionResult,
+  getValuePredictor,
+  predictPageViewValues,
+  predictValue,
+} from './predictors/valuePredictor';

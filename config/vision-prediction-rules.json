@@ -1,0 +1,195 @@
+{
+  "_meta": {
+    "version": "2.1",
+    "purpose": "Vision AI가 스크린샷을 보고 즉시 변수를 예측하기 위한 규칙",
+    "usage": "시스템 프롬프트에 포함하여 Vision AI가 참조",
+    "updated": "2024-12-20 - site_name 매핑 수정, channel/pageType 판단 로직 개선"
+  },
+
+  "step1_pageType": {
+    "instruction": "화면을 보고 먼저 페이지 타입을 판단하세요",
+    "priority_rules": [
+      "1. 이벤트 팝업이 있어도 배경에 메인 배너/추천 상품이 보이면 MAIN",
+      "2. URL에 /event/숫자 패턴이 있고 이벤트 전용 콘텐츠만 있으면 EVENT_DETAIL",
+      "3. 팝업은 무시하고 메인 콘텐츠 영역을 기준으로 판단"
+    ],
+    "rules": {
+      "MAIN": "대형 히어로 배너 + 추천 상품 섹션 (이벤트 팝업이 있어도 배경이 메인이면 MAIN)",
+      "PRODUCT_DETAIL": "단일 상품 큰 이미지 + 가격 + 장바구니/구매 버튼",
+      "PRODUCT_LIST": "상품 카드 그리드 (여러 상품) + 필터/정렬 옵션 + 카테고리명",
+      "SEARCH_RESULT": "'검색어' 검색 결과 표시 + 결과 개수 + 상품 목록",
+      "CART": "장바구니 상품 목록 + 수량 조절 + 총 금액 + 주문하기 버튼",
+      "ORDER": "배송지 입력 폼 + 결제 수단 선택 + 결제 버튼",
+      "ORDER_COMPLETE": "주문 완료 메시지 + 주문번호",
+      "EVENT_DETAIL": "이벤트 전용 페이지 (URL에 /event/ 포함 + 이벤트 콘텐츠만 존재)",
+      "BRAND_MAIN": "브랜드 로고 크게 + 브랜드 전용 상품 목록",
+      "MY": "회원 정보 + 주문 내역/포인트/쿠폰 메뉴"
+    }
+  },
+
+  "step2_variables": {
+    "instruction": "판단한 페이지 타입에 따라 변수값을 예측하세요",
+
+    "page_location": {
+      "description": "full URL을 100자 단위로 분할 (GA4 Custom Dimension 100자 제한 대응)",
+      "how": "URL 전체를 100자씩 잘라서 page_location_1~5에 순서대로 저장",
+      "example": {
+        "url": "https://www.amoremall.com/kr/ko/product/detail?onlineProdCode=12345&category=skincare&brand=sulwhasoo",
+        "page_location_1": "https://www.amoremall.com/kr/ko/product/detail?onlineProdCode=12345&category=skincare&brand=sul",
+        "page_location_2": "whasoo",
+        "page_location_3": null,
+        "page_location_4": null,
+        "page_location_5": null
+      },
+      "note": "100자를 넘어가면 데이터 오류/누락 발생 가능하므로 분할 저장"
+    },
+
+    "always": {
+      "site_name": {
+        "how": "도메인 → 사이트명 (정확한 매핑 사용)",
+        "map": {
+          "amoremall.com": "APMALL",
+          "innisfree.com": "INNISFREE",
+          "osulloc.com": "OSULLOC",
+          "illiyoon.com": "ILLIYOON",
+          "aritaum.com": "ARITAUM",
+          "espoir.com": "ESPOIR",
+          "laboh.co.kr": "LABOH",
+          "aestura.com": "AESTURA",
+          "brdy.co.kr": "BRDY",
+          "ayunche.com": "AYUNCHE",
+          "amospro.com": "AMOSPRO",
+          "makeonshop.co.kr": "MAKEON"
+        }
+      },
+      "site_country": {
+        "how": "URL 패턴 우선, 없으면 html lang 기반",
+        "priority": [
+          "1. URL에 /kr/ko/, /cn/zh/, /jp/ja/ 패턴 → 국가 코드 추출",
+          "2. URL에 /int/ + 영어 → GL (Global)",
+          "3. URL에 패턴 없으면 html lang 속성에서 추론 (ko→KR, en→US, ja→JP, zh→CN)"
+        ],
+        "default": "KR"
+      },
+      "site_language": {
+        "how": "URL 패턴 우선, 없으면 html lang 기반",
+        "priority": [
+          "1. URL에 /kr/ko/ 패턴 → ko-KR",
+          "2. URL에 /int/ + 영어 → en-GL",
+          "3. URL에 패턴 없으면 html lang 속성 사용"
+        ],
+        "default": "ko-KR"
+      },
+      "channel": {
+        "how": "viewport 또는 User-Agent 기반 판단",
+        "rules": {
+          "PC": "viewport width >= 1024 또는 데스크톱 레이아웃",
+          "MO": "viewport width < 1024 또는 모바일 레이아웃"
+        },
+        "priority": [
+          "1. viewport가 명시적으로 전달되면 width >= 1024 → PC, 아니면 MO",
+          "2. viewport가 없으면 화면 레이아웃으로 판단 (데스크톱/모바일)"
+        ],
+        "note": "URL 패턴(/mweb/, /m./)이 아닌 실제 viewport/레이아웃으로 판단"
+      },
+      "content_group": { "how": "step1에서 판단한 페이지 타입" },
+      "login_is_login": { "how": "로그인버튼 보임 → N, 마이페이지/로그아웃 보임 → Y" }
+    },
+
+    "when_PRODUCT_DETAIL": {
+      "product_id": {
+        "how": "URL 쿼리스트링에서 추출 (우선순위 순)",
+        "priority": [
+          "1. onlineProdCode (최우선)",
+          "2. onlineProdSn",
+          "3. product_no",
+          "4. productId",
+          "5. /product/숫자 URL 패턴"
+        ],
+        "example": "?onlineProdCode=12345 → 12345"
+      },
+      "product_name": { "how": "화면의 큰 상품명 텍스트" },
+      "product_brandname": { "how": "상품명 위/옆의 브랜드명" }
+    },
+
+    "when_SEARCH_RESULT": {
+      "search_brand_code": { "how": "필터에서 선택된 브랜드 코드" },
+      "search_brand": { "how": "필터에서 선택된 브랜드명" }
+    },
+
+    "when_EVENT_DETAIL": {
+      "view_event_code": { "how": "URL에서 이벤트 ID 추출" },
+      "view_event_name": { "how": "이벤트 배너/제목 텍스트" }
+    },
+
+    "when_BRAND_MAIN": {
+      "brandshop_code": { "how": "URL에서 브랜드 코드 추출" },
+      "brandshop_name": { "how": "브랜드 로고/이름 텍스트" }
+    },
+
+    "when_CART_OR_ORDER": {
+      "checkout_step": {
+        "description": "begin_checkout 이벤트의 파라미터로, 구매 퍼널 단계를 나타냄",
+        "values": {
+          "1": "장바구니 페이지 랜딩 (CART 페이지 진입)",
+          "2": "바로구매 버튼 클릭 (상품상세/장바구니 카드의 바로구매)",
+          "3": "체크아웃 페이지 (ORDER 페이지 진입)",
+          "4": "체크아웃 페이지 내 구매/결제 버튼 클릭"
+        },
+        "how": "페이지 타입과 사용자 액션으로 판단",
+        "rules": [
+          "CART 페이지 로드 → 1",
+          "바로구매 버튼 보임/클릭 → 2",
+          "ORDER 페이지 로드 → 3",
+          "ORDER 페이지에서 결제하기 버튼 → 4"
+        ]
+      }
+    }
+  },
+
+  "step3_events": {
+    "instruction": "페이지 타입에 따라 발생하는 이벤트를 예측하세요",
+
+    "autoFire": {
+      "MAIN": ["page_view"],
+      "PRODUCT_DETAIL": ["page_view", "view_item"],
+      "PRODUCT_LIST": ["page_view", "view_item_list"],
+      "SEARCH_RESULT": ["page_view", "view_search_results", "view_item_list"],
+      "CART": ["page_view", "view_cart"],
+      "ORDER": ["page_view", "begin_checkout"],
+      "ORDER_COMPLETE": ["page_view", "purchase"]
+    },
+
+    "conditional": {
+      "view_promotion": "프로모션 배너가 뷰포트에 보일 때 (MAIN, PRODUCT_LIST)",
+      "view_item_list": "상품 목록이 보일 때 (MAIN에서 추천상품 섹션)"
+    },
+
+    "forbidden": {
+      "MAIN": ["view_item", "add_to_cart", "purchase"],
+      "PRODUCT_LIST": ["view_item", "purchase"],
+      "CART": ["view_item", "purchase"],
+      "ORDER": ["view_item", "view_item_list"]
+    }
+  },
+
+  "outputSchema": {
+    "pageType": "string (MAIN|PRODUCT_DETAIL|PRODUCT_LIST|SEARCH_RESULT|CART|ORDER|ORDER_COMPLETE|EVENT_DETAIL|BRAND_MAIN|MY)",
+    "confidence": "string (high|medium|low)",
+    "variables": {
+      "site_name": "string",
+      "site_country": "string",
+      "site_language": "string",
+      "channel": "string (PC|MO)",
+      "content_group": "string",
+      "login_is_login": "string (Y|N)",
+      "_conditional": "object (페이지 타입에 따른 추가 변수)"
+    },
+    "events": {
+      "autoFire": ["string"],
+      "conditional": ["string"],
+      "forbidden": ["string"]
+    },
+    "reasoning": "string (판단 근거 간략 설명)"
+  }
+}
