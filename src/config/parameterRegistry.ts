@@ -5,7 +5,10 @@
  * PARAM_MAPPING_TABLE.md가 업데이트되면 reload()를 호출하여 갱신합니다.
  *
  * 데이터 흐름:
- * PARAM_MAPPING_TABLE.md (사람이 관리) → Parser → Registry (Agent 조회)
+ * 1. GTM JSON에서 실제 파라미터 목록 추출 (Ground Truth)
+ * 2. PARAM_MAPPING_TABLE.md 파싱
+ * 3. 두 결과 비교 검증
+ * 4. Agent에서 조회
  */
 
 import * as fs from 'fs';
@@ -16,6 +19,7 @@ import {
   ParameterQueryService,
   UnifiedParameterStore,
   getGA4ApiDimension,
+  validateParameters,
 } from '../parsers/paramMappingParser';
 
 /**
@@ -40,7 +44,7 @@ const state: RegistryState = {
 };
 
 /**
- * 파라미터 레지스트리 초기화
+ * 파라미터 레지스트리 초기화 (검증 포함)
  *
  * Agent 시작 시 반드시 호출해야 합니다.
  * GTMConfigLoader.preload()에서 자동 호출됩니다.
@@ -64,16 +68,29 @@ export async function initializeParameterRegistry(options?: {
   const stats = fs.statSync(state.sourceFilePath);
   state.lastModified = stats.mtime;
 
-  // 파라미터 스토어 로드
+  // 파라미터 스토어 로드 (GTM 검증 포함)
   state.store = loadParameterStore(true); // force reload
   state.queryService = getParameterQueryService();
   state.lastLoaded = new Date();
   state.initialized = true;
 
+  // 검증 결과 출력
   console.log(`✅ Parameter Registry 초기화 완료`);
   console.log(`   소스: ${state.sourceFilePath}`);
   console.log(`   이벤트: ${state.store.events.size}개`);
-  console.log(`   공통 파라미터: ${state.store.commonPageParams.length}개`);
+  console.log(`   Event Parameters: ${state.store.commonEventParams.length}개`);
+  console.log(`   User Properties: ${state.store.userProperties.length}개`);
+  console.log(`   ${state.store.validation.message}`);
+
+  // 검증 실패 시 경고
+  if (!state.store.validation.isValid) {
+    console.error('\n❌ 파라미터 파싱 검증 실패!');
+    console.error(`   GTM: ${state.store.gtmParamCount.eventParams}개`);
+    console.error(`   파서: ${state.store.commonEventParams.length}개`);
+    if (state.store.validation.missingParams.length > 0) {
+      console.error(`   누락: ${state.store.validation.missingParams.join(', ')}`);
+    }
+  }
 }
 
 /**
@@ -170,7 +187,28 @@ export function getApiDimension(ga4Key: string, scope: 'event' | 'item' | 'user'
 }
 
 /**
- * 레지스트리 상태 조회
+ * 파라미터 검증 실행
+ * Agent가 분석 전에 호출하여 파라미터가 누락되지 않았는지 확인
+ */
+export function runParameterValidation(): {
+  isValid: boolean;
+  gtmCount: number;
+  parserCount: number;
+  missing: string[];
+  extra: string[];
+  message: string;
+} {
+  const result = validateParameters();
+  return {
+    ...result,
+    message: result.isValid
+      ? `✅ 검증 통과: GTM(${result.gtmCount}) = 파서(${result.parserCount})`
+      : `❌ 검증 실패: GTM(${result.gtmCount}) ≠ 파서(${result.parserCount})`,
+  };
+}
+
+/**
+ * 레지스트리 상태 조회 (검증 결과 포함)
  */
 export function getRegistryStatus(): {
   initialized: boolean;
@@ -178,7 +216,10 @@ export function getRegistryStatus(): {
   lastModified: Date | null;
   lastLoaded: Date | null;
   eventCount: number;
-  commonParamCount: number;
+  eventParamCount: number;
+  userPropertyCount: number;
+  gtmParamCount: number;
+  isValid: boolean;
 } {
   return {
     initialized: state.initialized,
@@ -186,12 +227,15 @@ export function getRegistryStatus(): {
     lastModified: state.lastModified,
     lastLoaded: state.lastLoaded,
     eventCount: state.store?.events.size || 0,
-    commonParamCount: state.store?.commonPageParams.length || 0,
+    eventParamCount: state.store?.commonEventParams.length || 0,
+    userPropertyCount: state.store?.userProperties.length || 0,
+    gtmParamCount: state.store?.gtmParamCount.eventParams || 0,
+    isValid: state.store?.validation.isValid || false,
   };
 }
 
 /**
- * 초기화 확인
+ * 초기화 확인 (자동 초기화 + 검증)
  */
 function ensureInitialized(): void {
   if (!state.initialized || !state.queryService) {
@@ -200,24 +244,27 @@ function ensureInitialized(): void {
     state.store = store;
     state.queryService = getParameterQueryService();
     state.initialized = true;
+
+    // 검증 실패 시 경고
+    if (!store.validation.isValid) {
+      console.warn(`\n⚠️ 파라미터 검증 실패: ${store.validation.message}`);
+    }
   }
 }
 
 /**
- * 요약 출력
+ * 요약 출력 (검증 결과 포함)
  */
 export function printRegistrySummary(): void {
   ensureInitialized();
-  console.log('\n=== Parameter Registry 상태 ===');
-  console.log(`초기화: ${state.initialized ? '✅' : '❌'}`);
-  console.log(`소스: ${state.sourceFilePath}`);
-  console.log(`마지막 수정: ${state.lastModified?.toISOString() || 'N/A'}`);
-  console.log(`마지막 로드: ${state.lastLoaded?.toISOString() || 'N/A'}`);
+  state.queryService!.printSummary();
+}
 
-  if (state.store) {
-    console.log(`\n이벤트: ${state.store.events.size}개`);
-    console.log(`공통 페이지 파라미터: ${state.store.commonPageParams.length}개`);
-    console.log(`공통 사용자 파라미터: ${state.store.commonUserParams.length}개`);
-    console.log(`공통 item 파라미터: ${state.store.itemParams.length}개`);
-  }
+/**
+ * page_view 파라미터 전체 조회 (Agent용)
+ *
+ * @returns 45개 파라미터 (Event: 35개 + User Properties: 10개)
+ */
+export function getPageViewParameters() {
+  return getEventParameters('page_view');
 }

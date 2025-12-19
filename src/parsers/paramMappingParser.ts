@@ -1,11 +1,13 @@
 /**
- * PARAM_MAPPING_TABLE.md 파서
+ * PARAM_MAPPING_TABLE.md 파서 + GTM JSON 검증
  *
  * 원본 문서(PARAM_MAPPING_TABLE.md)를 파싱하여 통합 파라미터 스토어를 생성합니다.
- * 이 파서는 수동 중복 없이 원본 문서를 SSOT(Single Source of Truth)로 사용합니다.
+ * GTM JSON과 비교하여 파싱 결과가 정확한지 검증합니다.
  *
  * 데이터 흐름:
- * PARAM_MAPPING_TABLE.md → Parser → UnifiedParameterStore → getEventParams()
+ * 1. GTM JSON에서 실제 파라미터 목록 추출 (Ground Truth)
+ * 2. PARAM_MAPPING_TABLE.md 파싱
+ * 3. 두 결과 비교 검증
  */
 
 import * as fs from 'fs';
@@ -13,155 +15,174 @@ import * as path from 'path';
 
 /**
  * GA4 Data API 표준 dimension 매핑
- * https://developers.google.com/analytics/devguides/reporting/data/v1/api-schema
- *
- * key: GA4 이벤트 파라미터 이름
- * value: GA4 Data API dimension 이름
  */
 const GA4_STANDARD_DIMENSION_MAP: Record<string, string> = {
-  // 페이지 관련
   'page_location': 'pageLocation',
   'page_title': 'pageTitle',
   'page_referrer': 'pageReferrer',
   'page_path': 'pagePath',
-
-  // 지역
   'country': 'country',
   'city': 'city',
   'region': 'region',
-
-  // 언어/플랫폼
   'language': 'language',
   'platform': 'platform',
-
-  // 이커머스 표준
   'currency': 'currencyCode',
   'transaction_id': 'transactionId',
   'item_id': 'itemId',
   'item_name': 'itemName',
   'item_brand': 'itemBrand',
   'item_category': 'itemCategory',
-  'item_category2': 'itemCategory2',
-  'item_category3': 'itemCategory3',
-  'item_category4': 'itemCategory4',
-  'item_category5': 'itemCategory5',
   'item_variant': 'itemVariant',
   'item_list_name': 'itemListName',
-  'item_list_id': 'itemListId',
   'index': 'itemListPosition',
   'promotion_id': 'itemPromotionId',
   'promotion_name': 'itemPromotionName',
   'creative_slot': 'itemPromotionCreativeSlot',
-  'creative_name': 'itemPromotionCreativeName',
-
-  // 캠페인
-  'campaign': 'sessionCampaignName',
-  'source': 'sessionSource',
-  'medium': 'sessionMedium',
 };
 
-/**
- * GA4 파라미터를 GA4 Data API dimension으로 변환
- */
 export function getGA4ApiDimension(ga4Key: string, scope: 'event' | 'item' | 'user' = 'event'): {
   dimension: string;
   isCustom: boolean;
 } {
-  // 표준 dimension 확인
   const standardDimension = GA4_STANDARD_DIMENSION_MAP[ga4Key];
   if (standardDimension) {
     return { dimension: standardDimension, isCustom: false };
   }
-
-  // Custom dimension 생성
   if (scope === 'user') {
     return { dimension: `customUser:${ga4Key}`, isCustom: true };
-  } else if (scope === 'item') {
-    // item-level은 이커머스 리포트에서 별도 처리
-    return { dimension: `customEvent:${ga4Key}`, isCustom: true };
-  } else {
-    return { dimension: `customEvent:${ga4Key}`, isCustom: true };
   }
+  return { dimension: `customEvent:${ga4Key}`, isCustom: true };
 }
 
 /**
  * 파라미터 정의
  */
 export interface ParameterDefinition {
-  /** GA4 파라미터 키 */
   ga4Key: string;
-  /** 개발 가이드 변수명 */
   devGuideVar: string;
-  /** GTM 변수명 */
   gtmVariable?: string;
-  /** 설명 */
   description: string;
-  /** 예시 값 */
   example?: string;
-  /** 필수 여부 */
   required?: boolean;
-  /** 조건 (예: "로그인 시") */
   condition?: string;
-  /** GA4 표준 파라미터 여부 */
   isStandard?: boolean;
-  /** 스코프: event-level 또는 item-level */
-  scope: 'event' | 'item';
-  /** GA4 Data API dimension 이름 (표준 또는 customEvent:xxx) */
+  scope: 'event' | 'item' | 'user';
+  category?: 'event_common' | 'page_location' | 'user_id' | 'user_property' | 'conditional' | 'event_specific';
   ga4ApiDimension?: string;
-  /** GA4 API에서 custom dimension 여부 */
   isCustomDimension?: boolean;
 }
 
-/**
- * 이벤트별 파라미터 설정
- */
 export interface EventParameterConfig {
-  /** 이벤트 이름 (GA4) */
   eventName: string;
-  /** dataLayer 이벤트 이름 */
   dataLayerEvent?: string;
-  /** 이벤트 설명 */
   description?: string;
-  /** 이벤트 전용 파라미터 */
   parameters: ParameterDefinition[];
-  /** items 배열 포함 여부 */
   hasItems: boolean;
-  /** items 배열 변수명 */
   itemsVariable?: string;
 }
 
-/**
- * 통합 파라미터 스토어
- */
 export interface UnifiedParameterStore {
-  /** 파싱 시간 */
   parsedAt: Date;
-  /** 소스 파일 경로 */
   sourcePath: string;
-  /** 공통 파라미터 (페이지 정보) */
-  commonPageParams: ParameterDefinition[];
-  /** 공통 파라미터 (사용자 정보 - 로그인 시) */
-  commonUserParams: ParameterDefinition[];
+  gtmPath?: string;
+  /** 공통 Event Parameters (GT - Event Settings) */
+  commonEventParams: ParameterDefinition[];
+  /** User Properties */
+  userProperties: ParameterDefinition[];
   /** 이벤트별 파라미터 */
   events: Map<string, EventParameterConfig>;
-  /** item 배열 내 파라미터 (공통) */
+  /** item 배열 내 파라미터 */
   itemParams: ParameterDefinition[];
+  /** GTM 기준 파라미터 개수 (검증용) */
+  gtmParamCount: {
+    eventParams: number;
+    userProperties: number;
+    total: number;
+  };
+  /** 검증 결과 */
+  validation: {
+    isValid: boolean;
+    missingParams: string[];
+    extraParams: string[];
+    message: string;
+  };
 }
 
 /**
- * PARAM_MAPPING_TABLE.md 파서
+ * GTM JSON에서 파라미터 추출
+ */
+export function extractParamsFromGTM(gtmPath: string): {
+  eventParams: Array<{ name: string; variable: string }>;
+  userProperties: Array<{ name: string; variable: string }>;
+} {
+  if (!fs.existsSync(gtmPath)) {
+    return { eventParams: [], userProperties: [] };
+  }
+
+  const gtm = JSON.parse(fs.readFileSync(gtmPath, 'utf-8'));
+  const container = gtm.containerVersion || gtm;
+  const variables = container.variable || [];
+
+  const eventParams: Array<{ name: string; variable: string }> = [];
+  const userProperties: Array<{ name: string; variable: string }> = [];
+
+  // GT - Event Settings 변수 찾기
+  const eventSettings = variables.find((v: any) => v.name === 'GT - Event Settings');
+
+  if (eventSettings) {
+    const params = eventSettings.parameter || [];
+
+    // Event Parameters
+    const settingsTable = params.find((p: any) => p.key === 'eventSettingsTable');
+    if (settingsTable && settingsTable.list) {
+      for (const item of settingsTable.list) {
+        const map = item.map || [];
+        const paramName = map.find((m: any) => m.key === 'parameter')?.value || '';
+        const paramValue = map.find((m: any) => m.key === 'parameterValue')?.value || '';
+        if (paramName) {
+          eventParams.push({ name: paramName, variable: paramValue });
+        }
+      }
+    }
+
+    // User Properties
+    const userPropsTable = params.find((p: any) =>
+      p.key === 'userPropertiesForThisEvent' ||
+      p.key === 'setUserProperty' ||
+      p.key === 'userProperties'
+    );
+    if (userPropsTable && userPropsTable.list) {
+      for (const item of userPropsTable.list) {
+        const map = item.map || [];
+        const name = map.find((m: any) => m.key === 'name' || m.key === 'parameter')?.value || '';
+        const value = map.find((m: any) => m.key === 'value' || m.key === 'parameterValue')?.value || '';
+        if (name) {
+          userProperties.push({ name, variable: value });
+        }
+      }
+    }
+  }
+
+  return { eventParams, userProperties };
+}
+
+/**
+ * PARAM_MAPPING_TABLE.md 파서 (개선된 버전)
  */
 export class ParamMappingParser {
   private content: string = '';
   private sourcePath: string;
+  private gtmPath: string;
 
-  constructor(sourcePath?: string) {
+  constructor(sourcePath?: string, gtmPath?: string) {
     this.sourcePath = sourcePath ||
       path.join(process.cwd(), 'specs/sites/amorepacific_GTM-5FK5X5C4/mapping/PARAM_MAPPING_TABLE.md');
+    this.gtmPath = gtmPath ||
+      path.join(process.cwd(), 'GTM-5FK5X5C4_workspace112.json');
   }
 
   /**
-   * 파싱 실행
+   * 파싱 + 검증 실행
    */
   parse(): UnifiedParameterStore {
     if (!fs.existsSync(this.sourcePath)) {
@@ -170,26 +191,115 @@ export class ParamMappingParser {
 
     this.content = fs.readFileSync(this.sourcePath, 'utf-8');
 
+    // 1. GTM에서 실제 파라미터 목록 추출 (Ground Truth)
+    const gtmParams = extractParamsFromGTM(this.gtmPath);
+
+    // 2. PARAM_MAPPING_TABLE.md 파싱 (모든 섹션)
+    const commonEventParams = this.parseAllCommonEventParams();
+    const userProperties = this.parseUserProperties();
+    const events = this.parseEventParams();
+    const itemParams = this.parseCommonItemParams();
+
+    // 3. 검증
+    const parsedEventParamNames = new Set(commonEventParams.map(p => p.ga4Key));
+    const gtmEventParamNames = new Set(gtmParams.eventParams.map(p => p.name));
+
+    const missingParams = gtmParams.eventParams
+      .filter(p => !parsedEventParamNames.has(p.name))
+      .map(p => p.name);
+
+    const extraParams = commonEventParams
+      .filter(p => !gtmEventParamNames.has(p.ga4Key))
+      .map(p => p.ga4Key);
+
+    const isValid = missingParams.length === 0 && extraParams.length === 0;
+
     const store: UnifiedParameterStore = {
       parsedAt: new Date(),
       sourcePath: this.sourcePath,
-      commonPageParams: this.parseCommonPageParams(),
-      commonUserParams: this.parseCommonUserParams(),
-      events: this.parseEventParams(),
-      itemParams: this.parseCommonItemParams(),
+      gtmPath: this.gtmPath,
+      commonEventParams,
+      userProperties,
+      events,
+      itemParams,
+      gtmParamCount: {
+        eventParams: gtmParams.eventParams.length,
+        userProperties: gtmParams.userProperties.length,
+        total: gtmParams.eventParams.length + gtmParams.userProperties.length,
+      },
+      validation: {
+        isValid,
+        missingParams,
+        extraParams,
+        message: isValid
+          ? `✅ 검증 통과: GTM(${gtmParams.eventParams.length}) = 파서(${commonEventParams.length})`
+          : `❌ 검증 실패: GTM(${gtmParams.eventParams.length}) ≠ 파서(${commonEventParams.length}), 누락: ${missingParams.join(', ')}`,
+      },
     };
+
+    // 검증 결과 출력
+    if (!isValid) {
+      console.warn('\n⚠️ 파라미터 파싱 검증 실패!');
+      console.warn(`GTM Event Parameters: ${gtmParams.eventParams.length}개`);
+      console.warn(`파서 결과: ${commonEventParams.length}개`);
+      if (missingParams.length > 0) {
+        console.warn(`누락된 파라미터: ${missingParams.join(', ')}`);
+      }
+      if (extraParams.length > 0) {
+        console.warn(`추가된 파라미터: ${extraParams.join(', ')}`);
+      }
+    }
 
     return store;
   }
 
   /**
-   * 공통 페이지 정보 파라미터 파싱
+   * 모든 공통 Event Parameters 파싱 (5개 섹션)
    */
-  private parseCommonPageParams(): ParameterDefinition[] {
+  private parseAllCommonEventParams(): ParameterDefinition[] {
     const params: ParameterDefinition[] = [];
 
-    // "### 페이지 정보 변수" 섹션 찾기
-    const section = this.extractSection('페이지 정보 변수');
+    // 1. 페이지 정보 변수 (Event Parameters)
+    const pageInfoParams = this.parseSection('페이지 정보 변수', 'event_common');
+    params.push(...pageInfoParams);
+
+    // 2. 페이지 위치 변수 (breadcrumb 대체)
+    const pageLocationParams = this.parseSection('페이지 위치 변수', 'page_location');
+    params.push(...pageLocationParams);
+
+    // 3. 사용자 ID 변수 (Event Parameters)
+    const userIdParams = this.parseSection('사용자 ID 변수', 'user_id');
+    params.push(...userIdParams);
+
+    // 4. 조건부 파라미터 (content_group 기반) - 여러 하위 섹션
+    const conditionalSections = [
+      'PRODUCT_DETAIL 페이지 전용',
+      'EVENT_DETAIL 페이지 전용',
+      'BRAND_MAIN 페이지 전용',
+      '매장 관련 페이지 전용',
+      'SEARCH_RESULT 페이지 전용',
+    ];
+
+    for (const sectionName of conditionalSections) {
+      const conditionalParams = this.parseSection(sectionName, 'conditional');
+      // 조건 추가
+      for (const p of conditionalParams) {
+        p.condition = sectionName.replace(' 페이지 전용', '').replace(' 관련', '');
+      }
+      params.push(...conditionalParams);
+    }
+
+    return params;
+  }
+
+  /**
+   * User Properties 파싱
+   */
+  private parseUserProperties(): ParameterDefinition[] {
+    const params: ParameterDefinition[] = [];
+
+    // "### 사용자 속성 변수 (User Properties)" 섹션
+    const section = this.extractSectionContent('사용자 속성 변수');
     if (!section) return params;
 
     const rows = this.parseTableRows(section);
@@ -197,11 +307,12 @@ export class ParamMappingParser {
       if (row.length >= 4) {
         params.push({
           devGuideVar: row[0].replace(/`/g, ''),
-          ga4Key: row[1].replace(/`/g, ''),
-          description: row[2],
-          example: row[3],
-          scope: 'event',
-          required: true,
+          gtmVariable: row[1].replace(/`/g, ''),
+          ga4Key: row[2].replace(/`/g, ''),
+          description: row[3],
+          example: row[4] || '',
+          scope: 'user',
+          category: 'user_property',
         });
       }
     }
@@ -210,30 +321,87 @@ export class ParamMappingParser {
   }
 
   /**
-   * 공통 사용자 정보 파라미터 파싱 (로그인 시)
+   * 특정 섹션 파싱
    */
-  private parseCommonUserParams(): ParameterDefinition[] {
+  private parseSection(sectionName: string, category: ParameterDefinition['category']): ParameterDefinition[] {
     const params: ParameterDefinition[] = [];
 
-    // "### 사용자 정보 변수 (로그인 시)" 섹션 찾기
-    const section = this.extractSection('사용자 정보 변수');
+    const section = this.extractSectionContent(sectionName);
     if (!section) return params;
 
     const rows = this.parseTableRows(section);
     for (const row of rows) {
-      if (row.length >= 4) {
-        params.push({
-          devGuideVar: row[0].replace(/`/g, ''),
-          ga4Key: row[1].replace(/`/g, ''),
-          description: row[2],
-          example: row[3],
-          scope: 'event',
-          condition: '로그인 시',
-        });
+      if (row.length >= 3) {
+        // 테이블 형식에 따라 파싱
+        // 형식 1: | 개발 가이드 변수 | GTM Variable | GA4 파라미터 | 설명 | 예시 |
+        // 형식 2: | GTM Variable | GA4 파라미터 | 설명 | 예시 |
+        let devGuideVar = '';
+        let gtmVariable = '';
+        let ga4Key = '';
+        let description = '';
+        let example = '';
+
+        if (row[0].includes('{{') || row[0].includes('JS -') || row[0].includes('LT -')) {
+          // 형식 2: GTM Variable이 첫 번째
+          gtmVariable = row[0].replace(/`/g, '');
+          ga4Key = row[1].replace(/`/g, '');
+          description = row[2] || '';
+          example = row[3] || '';
+          devGuideVar = this.extractDevGuideVarFromGtmVar(gtmVariable);
+        } else {
+          // 형식 1: 개발 가이드 변수가 첫 번째
+          devGuideVar = row[0].replace(/`/g, '');
+          gtmVariable = row[1].replace(/`/g, '');
+          ga4Key = row[2].replace(/`/g, '');
+          description = row[3] || '';
+          example = row[4] || '';
+        }
+
+        // 유효한 GA4 파라미터인지 확인
+        if (ga4Key && !ga4Key.includes('GA4') && !ga4Key.includes('파라미터')) {
+          params.push({
+            devGuideVar,
+            gtmVariable,
+            ga4Key,
+            description,
+            example,
+            scope: 'event',
+            category,
+          });
+        }
       }
     }
 
     return params;
+  }
+
+  /**
+   * GTM 변수명에서 개발 가이드 변수 추론
+   */
+  private extractDevGuideVarFromGtmVar(gtmVar: string): string {
+    // {{JS - Site Name}} -> AP_DATA_SITENAME
+    const mapping: Record<string, string> = {
+      'Site Name': 'AP_DATA_SITENAME',
+      'Site Country': 'AP_DATA_COUNTRY',
+      'Site Language': 'AP_DATA_LANG',
+      'Site Env': 'AP_DATA_ENV',
+      'Channel': 'AP_DATA_CHANNEL',
+      'Content Group': 'AP_DATA_PAGETYPE',
+      'Login Is Login': 'AP_DATA_ISLOGIN',
+      'Login Id Gcid': 'AP_DATA_GCID',
+      'Login Id Cid': 'AP_DATA_CID',
+      'Page Referrer': '(browser)',
+      'User Agent': '(browser)',
+      'Internal Traffic Type': '(internal)',
+    };
+
+    for (const [key, val] of Object.entries(mapping)) {
+      if (gtmVar.includes(key)) {
+        return val;
+      }
+    }
+
+    return gtmVar;
   }
 
   /**
@@ -252,7 +420,6 @@ export class ParamMappingParser {
       const eventName = match[1];
       const description = match[2];
 
-      // 테이블 파싱
       const rows = this.parseTableRows(section);
       const parameters: ParameterDefinition[] = [];
 
@@ -263,7 +430,6 @@ export class ParamMappingParser {
           const ga4Key = row[2].replace(/`/g, '');
           const paramDescription = row[3];
 
-          // items 배열 내 파라미터인지 확인
           const isItemParam = gtmVariable.includes('items 배열 내');
 
           parameters.push({
@@ -272,15 +438,13 @@ export class ParamMappingParser {
             ga4Key,
             description: paramDescription,
             scope: isItemParam ? 'item' : 'event',
+            category: 'event_specific',
           });
         }
       }
 
-      // items 배열 변수 찾기
       const itemsMatch = section.match(/\*\*items 배열\*\*: `([^`]+)`/);
       const hasItems = parameters.some(p => p.scope === 'item') || !!itemsMatch;
-
-      // dataLayer event 찾기
       const dataLayerMatch = section.match(/\*\*dataLayer event\*\*: `([^`]+)`/);
 
       events.set(eventName, {
@@ -297,35 +461,26 @@ export class ParamMappingParser {
   }
 
   /**
-   * 공통 item 파라미터 파싱 (이커머스 공통)
-   * 모든 이벤트에서 "(items 배열 내)" 파라미터를 수집하여 중복 제거
+   * 공통 item 파라미터 파싱
    */
   private parseCommonItemParams(): ParameterDefinition[] {
     const params: ParameterDefinition[] = [];
-
-    // 모든 이벤트 섹션에서 item 파라미터 수집
-    const ecommerceEvents = [
-      'select_item', 'add_to_cart', 'remove_from_cart',
-      'begin_checkout', 'purchase', 'view_item'
-    ];
+    const ecommerceEvents = ['select_item', 'add_to_cart', 'remove_from_cart', 'begin_checkout', 'purchase', 'view_item'];
 
     for (const eventName of ecommerceEvents) {
-      const section = this.extractSection(eventName);
+      const section = this.extractSectionContent(eventName);
       if (!section) continue;
 
       const rows = this.parseTableRows(section);
       for (const row of rows) {
         if (row.length >= 4) {
           const gtmVariable = row[1].replace(/`/g, '');
-
-          // items 배열 내 파라미터만 추출
           if (!gtmVariable.includes('items 배열 내')) continue;
 
           const devGuideVar = row[0].replace(/`/g, '');
           const ga4Key = row[2].replace(/`/g, '');
           const description = row[3];
 
-          // 중복 체크
           if (!params.find(p => p.ga4Key === ga4Key)) {
             params.push({
               devGuideVar,
@@ -342,12 +497,23 @@ export class ParamMappingParser {
   }
 
   /**
-   * 섹션 추출
+   * 섹션 내용 추출
    */
-  private extractSection(sectionName: string): string | null {
-    const regex = new RegExp(`### [^\\n]*${sectionName}[^\\n]*\\n([\\s\\S]*?)(?=###|$)`, 'i');
-    const match = this.content.match(regex);
-    return match ? match[1] : null;
+  private extractSectionContent(sectionName: string): string | null {
+    // 더 정확한 섹션 추출
+    const patterns = [
+      new RegExp(`###+ [^\\n]*${sectionName}[^\\n]*\\n([\\s\\S]*?)(?=\\n###|\\n---\\n|$)`, 'i'),
+      new RegExp(`####+ ${sectionName}[^\\n]*\\n([\\s\\S]*?)(?=\\n####|\\n###|$)`, 'i'),
+    ];
+
+    for (const regex of patterns) {
+      const match = this.content.match(regex);
+      if (match) {
+        return match[1];
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -358,15 +524,16 @@ export class ParamMappingParser {
     const lines = content.split('\n');
 
     for (const line of lines) {
-      // 테이블 행: | col1 | col2 | ...
       if (line.trim().startsWith('|') && !line.includes('---')) {
         const cells = line
           .split('|')
           .map(cell => cell.trim())
           .filter(cell => cell.length > 0);
 
-        // 헤더 행 스킵 (개발 가이드 변수, GTM Variable 등)
-        if (cells[0]?.includes('개발 가이드') || cells[0]?.includes('GA4 파라미터')) {
+        // 헤더 행 스킵
+        if (cells[0]?.includes('개발 가이드') ||
+            cells[0]?.includes('GA4 파라미터') ||
+            cells[0]?.includes('GTM Variable')) {
           continue;
         }
 
@@ -381,7 +548,7 @@ export class ParamMappingParser {
 }
 
 /**
- * 통합 파라미터 쿼리 서비스
+ * 통합 파라미터 쿼리 서비스 (개선된 버전)
  */
 export class ParameterQueryService {
   private store: UnifiedParameterStore;
@@ -391,7 +558,7 @@ export class ParameterQueryService {
   }
 
   /**
-   * 이벤트별 전체 파라미터 조회
+   * page_view 등 특정 이벤트의 전체 파라미터 조회
    */
   getEventParams(eventName: string): {
     eventName: string;
@@ -400,209 +567,192 @@ export class ParameterQueryService {
     userParams: ParameterDefinition[];
     itemParams: ParameterDefinition[] | null;
     hasItems: boolean;
+    totalCount: number;
   } | null {
     const eventConfig = this.store.events.get(eventName);
 
-    if (!eventConfig) {
-      return null;
-    }
+    // page_view의 경우 공통 파라미터만 사용
+    const isPageView = eventName === 'page_view';
 
     return {
       eventName,
-      commonParams: this.store.commonPageParams,
-      eventParams: eventConfig.parameters.filter(p => p.scope === 'event'),
-      userParams: this.store.commonUserParams,
-      itemParams: eventConfig.hasItems ? this.store.itemParams : null,
-      hasItems: eventConfig.hasItems,
+      commonParams: this.store.commonEventParams,
+      eventParams: eventConfig?.parameters.filter(p => p.scope === 'event') || [],
+      userParams: this.store.userProperties,
+      itemParams: eventConfig?.hasItems ? this.store.itemParams : null,
+      hasItems: eventConfig?.hasItems || false,
+      totalCount: this.store.commonEventParams.length + this.store.userProperties.length +
+        (eventConfig?.parameters.filter(p => p.scope === 'event').length || 0),
     };
   }
 
   /**
-   * 이벤트별 파라미터 조회 (GA4 Data API dimension 포함)
-   *
-   * @example
-   * const result = service.getEventParamsWithApiMapping('page_view');
-   * // result.parameters[0].ga4ApiDimension = 'customEvent:site_name'
+   * 이벤트별 파라미터 조회 (GA4 API dimension 포함)
    */
   getEventParamsWithApiMapping(eventName: string): {
     eventName: string;
     parameters: Array<ParameterDefinition & {
       ga4ApiDimension: string;
       isCustomDimension: boolean;
-      category: 'common' | 'event' | 'user' | 'item';
+      category: string;
     }>;
     hasItems: boolean;
     summary: {
       total: number;
-      standard: number;
-      custom: number;
+      eventParams: number;
+      userProperties: number;
     };
   } | null {
-    const eventConfig = this.store.events.get(eventName);
-
-    if (!eventConfig) {
-      return null;
-    }
-
     const parameters: Array<ParameterDefinition & {
       ga4ApiDimension: string;
       isCustomDimension: boolean;
-      category: 'common' | 'event' | 'user' | 'item';
+      category: string;
     }> = [];
 
-    // 공통 페이지 파라미터
-    for (const p of this.store.commonPageParams) {
+    // 공통 Event Parameters
+    for (const p of this.store.commonEventParams) {
       const apiInfo = getGA4ApiDimension(p.ga4Key, 'event');
       parameters.push({
         ...p,
         ga4ApiDimension: apiInfo.dimension,
         isCustomDimension: apiInfo.isCustom,
-        category: 'common',
+        category: p.category || 'event_common',
       });
     }
 
-    // 이벤트 전용 파라미터
-    for (const p of eventConfig.parameters.filter(p => p.scope === 'event')) {
-      // 공통 파라미터와 중복 체크
-      if (parameters.find(ep => ep.ga4Key === p.ga4Key)) continue;
-
-      const apiInfo = getGA4ApiDimension(p.ga4Key, 'event');
-      parameters.push({
-        ...p,
-        ga4ApiDimension: apiInfo.dimension,
-        isCustomDimension: apiInfo.isCustom,
-        category: 'event',
-      });
-    }
-
-    // 사용자 파라미터 (로그인 시)
-    for (const p of this.store.commonUserParams) {
+    // User Properties
+    for (const p of this.store.userProperties) {
       const apiInfo = getGA4ApiDimension(p.ga4Key, 'user');
       parameters.push({
         ...p,
         ga4ApiDimension: apiInfo.dimension,
         isCustomDimension: apiInfo.isCustom,
-        category: 'user',
+        category: 'user_property',
       });
     }
 
-    // item 파라미터 (해당 시)
-    if (eventConfig.hasItems) {
-      for (const p of this.store.itemParams) {
-        const apiInfo = getGA4ApiDimension(p.ga4Key, 'item');
+    // 이벤트 전용 파라미터
+    const eventConfig = this.store.events.get(eventName);
+    if (eventConfig) {
+      for (const p of eventConfig.parameters.filter(p => p.scope === 'event')) {
+        if (parameters.find(ep => ep.ga4Key === p.ga4Key)) continue;
+
+        const apiInfo = getGA4ApiDimension(p.ga4Key, 'event');
         parameters.push({
           ...p,
           ga4ApiDimension: apiInfo.dimension,
           isCustomDimension: apiInfo.isCustom,
-          category: 'item',
+          category: 'event_specific',
         });
       }
     }
 
-    const standardCount = parameters.filter(p => !p.isCustomDimension).length;
-    const customCount = parameters.filter(p => p.isCustomDimension).length;
-
     return {
       eventName,
       parameters,
-      hasItems: eventConfig.hasItems,
+      hasItems: eventConfig?.hasItems || false,
       summary: {
         total: parameters.length,
-        standard: standardCount,
-        custom: customCount,
+        eventParams: this.store.commonEventParams.length,
+        userProperties: this.store.userProperties.length,
       },
     };
   }
 
-  /**
-   * 이벤트 목록 조회
-   */
   getEventList(): string[] {
     return Array.from(this.store.events.keys());
   }
 
-  /**
-   * 공통 파라미터 조회
-   */
   getCommonParams(): {
-    pageParams: ParameterDefinition[];
-    userParams: ParameterDefinition[];
+    eventParams: ParameterDefinition[];
+    userProperties: ParameterDefinition[];
   } {
     return {
-      pageParams: this.store.commonPageParams,
-      userParams: this.store.commonUserParams,
+      eventParams: this.store.commonEventParams,
+      userProperties: this.store.userProperties,
     };
   }
 
   /**
-   * 파라미터 키로 검색
+   * 검증 결과 조회
    */
+  getValidation(): UnifiedParameterStore['validation'] {
+    return this.store.validation;
+  }
+
+  /**
+   * GTM 기준 파라미터 개수 조회
+   */
+  getGtmParamCount(): UnifiedParameterStore['gtmParamCount'] {
+    return this.store.gtmParamCount;
+  }
+
   findParameterByKey(ga4Key: string): {
     parameter: ParameterDefinition;
-    source: 'common_page' | 'common_user' | 'event' | 'item';
+    source: 'event_common' | 'user_property' | 'event_specific' | 'item';
     eventName?: string;
   } | null {
-    // 공통 페이지 파라미터
-    const pageParam = this.store.commonPageParams.find(p => p.ga4Key === ga4Key);
-    if (pageParam) {
-      return { parameter: pageParam, source: 'common_page' };
+    const eventParam = this.store.commonEventParams.find(p => p.ga4Key === ga4Key);
+    if (eventParam) {
+      return { parameter: eventParam, source: 'event_common' };
     }
 
-    // 공통 사용자 파라미터
-    const userParam = this.store.commonUserParams.find(p => p.ga4Key === ga4Key);
-    if (userParam) {
-      return { parameter: userParam, source: 'common_user' };
+    const userProp = this.store.userProperties.find(p => p.ga4Key === ga4Key);
+    if (userProp) {
+      return { parameter: userProp, source: 'user_property' };
     }
 
-    // item 파라미터
     const itemParam = this.store.itemParams.find(p => p.ga4Key === ga4Key);
     if (itemParam) {
       return { parameter: itemParam, source: 'item' };
     }
 
-    // 이벤트별 파라미터
     for (const [eventName, config] of this.store.events) {
       const eventParam = config.parameters.find(p => p.ga4Key === ga4Key);
       if (eventParam) {
-        return { parameter: eventParam, source: 'event', eventName };
+        return { parameter: eventParam, source: 'event_specific', eventName };
       }
     }
 
     return null;
   }
 
-  /**
-   * 개발 가이드 변수명으로 검색
-   */
   findParameterByDevGuideVar(devGuideVar: string): ParameterDefinition | null {
-    // 모든 소스에서 검색
     const allParams = [
-      ...this.store.commonPageParams,
-      ...this.store.commonUserParams,
+      ...this.store.commonEventParams,
+      ...this.store.userProperties,
       ...this.store.itemParams,
       ...Array.from(this.store.events.values()).flatMap(e => e.parameters),
     ];
-
     return allParams.find(p => p.devGuideVar === devGuideVar) || null;
   }
 
   /**
-   * 요약 출력
+   * 요약 출력 (검증 결과 포함)
    */
   printSummary(): void {
     console.log('\n=== 통합 파라미터 스토어 요약 ===');
     console.log(`파싱 시간: ${this.store.parsedAt.toISOString()}`);
     console.log(`소스: ${this.store.sourcePath}`);
-    console.log(`\n공통 페이지 파라미터: ${this.store.commonPageParams.length}개`);
-    console.log(`공통 사용자 파라미터: ${this.store.commonUserParams.length}개`);
-    console.log(`이벤트: ${this.store.events.size}개`);
-    console.log(`공통 item 파라미터: ${this.store.itemParams.length}개`);
+    console.log(`\n[GTM 기준]`);
+    console.log(`  Event Parameters: ${this.store.gtmParamCount.eventParams}개`);
+    console.log(`  User Properties: ${this.store.gtmParamCount.userProperties}개`);
+    console.log(`  총합: ${this.store.gtmParamCount.total}개`);
+    console.log(`\n[파서 결과]`);
+    console.log(`  공통 Event Parameters: ${this.store.commonEventParams.length}개`);
+    console.log(`  User Properties: ${this.store.userProperties.length}개`);
+    console.log(`  이벤트: ${this.store.events.size}개`);
+    console.log(`  item 파라미터: ${this.store.itemParams.length}개`);
+    console.log(`\n[검증 결과]`);
+    console.log(`  ${this.store.validation.message}`);
 
-    console.log('\n📋 이벤트 목록:');
-    for (const [eventName, config] of this.store.events) {
-      const paramCount = config.parameters.length;
-      const itemsTag = config.hasItems ? ' [items]' : '';
-      console.log(`  - ${eventName}: ${paramCount}개 파라미터${itemsTag}`);
+    if (!this.store.validation.isValid) {
+      if (this.store.validation.missingParams.length > 0) {
+        console.log(`  누락: ${this.store.validation.missingParams.join(', ')}`);
+      }
+      if (this.store.validation.extraParams.length > 0) {
+        console.log(`  추가: ${this.store.validation.extraParams.join(', ')}`);
+      }
     }
   }
 }
@@ -611,9 +761,6 @@ export class ParameterQueryService {
 let cachedStore: UnifiedParameterStore | null = null;
 let cachedQueryService: ParameterQueryService | null = null;
 
-/**
- * 통합 파라미터 스토어 로드 (캐싱)
- */
 export function loadParameterStore(force = false): UnifiedParameterStore {
   if (cachedStore && !force) {
     return cachedStore;
@@ -626,9 +773,6 @@ export function loadParameterStore(force = false): UnifiedParameterStore {
   return cachedStore;
 }
 
-/**
- * 파라미터 쿼리 서비스 가져오기
- */
 export function getParameterQueryService(): ParameterQueryService {
   if (!cachedQueryService) {
     loadParameterStore();
@@ -636,9 +780,29 @@ export function getParameterQueryService(): ParameterQueryService {
   return cachedQueryService!;
 }
 
-/**
- * 간편 함수: 이벤트 파라미터 조회
- */
 export function getEventParams(eventName: string) {
   return getParameterQueryService().getEventParams(eventName);
 }
+
+/**
+ * 파라미터 검증 실행 (Agent가 호출)
+ */
+export function validateParameters(): {
+  isValid: boolean;
+  gtmCount: number;
+  parserCount: number;
+  missing: string[];
+  extra: string[];
+} {
+  const store = loadParameterStore(true);
+  return {
+    isValid: store.validation.isValid,
+    gtmCount: store.gtmParamCount.eventParams,
+    parserCount: store.commonEventParams.length,
+    missing: store.validation.missingParams,
+    extra: store.validation.extraParams,
+  };
+}
+
+// 하위 호환성을 위한 별칭
+export { ParameterDefinition as ParamDefinition };
