@@ -16,14 +16,22 @@ import { EventParameterValidator, EventValidationResult, ValidationReport } from
 
 dotenv.config();
 
-// 테스트할 이벤트 목록 (우선순위 높은 것부터)
-// 조건부 변수 예측이 중요한 이벤트 위주
+// 테스트할 이벤트 목록 (전체)
+// 제외: purchase, remove_from_cart, sign_up, login (로그인/구매 필요)
 const TARGET_EVENTS = [
+  // 페이지 로드 시 자동 발생
   'page_view',
   'view_item',          // PRODUCT_DETAIL - 상품 정보 예측
   'view_item_list',     // PRODUCT_LIST/SEARCH - 검색 정보 예측
   'view_cart',          // CART - 장바구니 정보 예측
   'view_promotion',     // MAIN - 프로모션 정보 예측
+  // 사용자 액션 필요
+  'select_item',        // 상품 클릭
+  'add_to_cart',        // 장바구니 추가 클릭
+  'select_promotion',   // 프로모션 클릭
+  'scroll',             // 스크롤 액션
+  'ap_click',           // 일반 클릭
+  // 제외 (로그인 필요): 'begin_checkout', 'purchase', 'remove_from_cart', 'login', 'sign_up'
 ];
 
 // 이벤트별 테스트 페이지 URL (GA4 API 폴백용)
@@ -52,6 +60,70 @@ const DEFAULT_TEST_PAGES: Record<string, string[]> = {
     'https://www.amoremall.com/kr/ko/display/main',
     'https://www.amoremall.com/kr/ko/product/detail?onlineProdSn=91736',
   ],
+  'select_item': [
+    // 상품 목록에서 상품 클릭
+    'https://www.amoremall.com/kr/ko/display/main',
+  ],
+  'add_to_cart': [
+    // 상품 상세에서 장바구니 추가
+    'https://www.amoremall.com/kr/ko/product/detail?onlineProdSn=91736',
+  ],
+  'select_promotion': [
+    // 프로모션 배너 클릭
+    'https://www.amoremall.com/kr/ko/display/main',
+  ],
+  'scroll': [
+    // 스크롤 이벤트 발생 페이지
+    'https://www.amoremall.com/kr/ko/display/main',
+    'https://www.amoremall.com/kr/ko/product/detail?onlineProdSn=91736',
+  ],
+  'ap_click': [
+    // 일반 클릭 이벤트
+    'https://www.amoremall.com/kr/ko/display/main',
+  ],
+};
+
+/**
+ * 이벤트별 액션 정의
+ */
+interface EventAction {
+  type: 'none' | 'click' | 'scroll' | 'hover';
+  selector?: string;
+  scrollAmount?: number;
+  description: string;
+}
+
+const EVENT_ACTIONS: Record<string, EventAction> = {
+  'page_view': { type: 'none', description: '페이지 로드 시 자동 발생' },
+  'view_item': { type: 'none', description: '상품 상세 페이지 로드 시 자동 발생' },
+  'view_item_list': { type: 'none', description: '상품 목록 노출 시 자동 발생' },
+  'view_cart': { type: 'none', description: '장바구니 페이지 로드 시 자동 발생' },
+  'view_promotion': { type: 'none', description: '프로모션 노출 시 자동 발생' },
+  'select_item': {
+    type: 'click',
+    selector: '.product-card a, .prd-item a, [data-gtm-product] a, .swiper-slide a[href*="product"]',
+    description: '상품 클릭'
+  },
+  'add_to_cart': {
+    type: 'click',
+    selector: '.btn-cart, .add-cart, [class*="cart"] button, button[class*="장바구니"]',
+    description: '장바구니 추가 버튼 클릭'
+  },
+  'select_promotion': {
+    type: 'click',
+    selector: '.banner a, .promotion a, .swiper-slide a[href*="event"], [class*="banner"] a',
+    description: '프로모션 배너 클릭'
+  },
+  'scroll': {
+    type: 'scroll',
+    scrollAmount: 1000,
+    description: '페이지 스크롤'
+  },
+  'ap_click': {
+    type: 'click',
+    selector: 'a[href], button',
+    description: '일반 요소 클릭'
+  },
 };
 
 /**
@@ -123,34 +195,75 @@ async function visitAndCollect(
 
     await page.waitForTimeout(1500);
 
+    // 전역 변수 수집 함수
+    const collectWindowVars = async () => {
+      return await page.evaluate(() => {
+        const vars: Record<string, string> = {};
+        const varNames = [
+          'AP_DATA_SITENAME', 'AP_DATA_COUNTRY', 'AP_DATA_LANG', 'AP_DATA_ENV',
+          'AP_DATA_CHANNEL', 'AP_DATA_PAGETYPE', 'AP_DATA_ISLOGIN',
+          'AP_PRD_CODE', 'AP_PRD_NAME', 'AP_PRD_BRAND', 'AP_PRD_CATEGORY',
+          'AP_PRD_PRICE', 'AP_PRD_PRDPRICE', 'AP_PRD_DISCOUNT',
+          'AP_PROMO_ID', 'AP_PROMO_NAME',
+          'AP_SEARCH_TERM', 'AP_SEARCH_RESULT', 'AP_SEARCH_NUM',
+          'AP_CART_ITEMCOUNT', 'AP_CART_TOTALPRICE',
+          'AP_ORDER_STEP', 'AP_ORDER_PAYTYPE',
+          'AP_PURCHASE_ORDERNUM', 'AP_PURCHASE_PRICE',
+        ];
+
+        for (const name of varNames) {
+          const value = (window as any)[name];
+          if (value !== undefined && value !== null && value !== '') {
+            vars[name] = String(value);
+          }
+        }
+        return vars;
+      });
+    };
+
+    // 이벤트별 액션 실행
+    const action = EVENT_ACTIONS[eventName];
+    if (action && action.type !== 'none') {
+      try {
+        if (action.type === 'scroll' && action.scrollAmount) {
+          // 스크롤 액션
+          await page.evaluate((amount) => {
+            window.scrollBy(0, amount);
+          }, action.scrollAmount);
+          await page.waitForTimeout(1000);
+          // 스크롤 후 변수 수집
+          const windowVars = await collectWindowVars();
+          Object.assign(actualVariables, windowVars);
+        } else if (action.type === 'click' && action.selector) {
+          // 클릭 이벤트: 클릭 전에 변수 수집 (dataLayer 이벤트는 클릭 시점에 발생)
+          const windowVars = await collectWindowVars();
+          Object.assign(actualVariables, windowVars);
+
+          // 클릭 액션 - 요소 찾기
+          const element = await page.$(action.selector);
+          if (element) {
+            // 요소로 스크롤 후 클릭
+            await element.scrollIntoViewIfNeeded();
+            await page.waitForTimeout(500);
+
+            // 클릭 (이벤트만 발생, 네비게이션 방지)
+            await element.dispatchEvent('click');
+            await page.waitForTimeout(500);
+          } else {
+            errors.push(`액션 요소를 찾을 수 없음: ${action.selector}`);
+          }
+        }
+      } catch (actionError: any) {
+        errors.push(`액션 실행 오류: ${actionError.message}`);
+      }
+    } else {
+      // 액션 없음: 페이지 로드 후 변수 수집
+      const windowVars = await collectWindowVars();
+      Object.assign(actualVariables, windowVars);
+    }
+
     // 스크린샷 캡처
     await page.screenshot({ path: screenshotPath, fullPage: false });
-
-    // 전역 변수 수집
-    const windowVars = await page.evaluate(() => {
-      const vars: Record<string, string> = {};
-      const varNames = [
-        'AP_DATA_SITENAME', 'AP_DATA_COUNTRY', 'AP_DATA_LANG', 'AP_DATA_ENV',
-        'AP_DATA_CHANNEL', 'AP_DATA_PAGETYPE', 'AP_DATA_ISLOGIN',
-        'AP_PRD_CODE', 'AP_PRD_NAME', 'AP_PRD_BRAND', 'AP_PRD_CATEGORY',
-        'AP_PRD_PRICE', 'AP_PRD_PRDPRICE', 'AP_PRD_DISCOUNT',
-        'AP_PROMO_ID', 'AP_PROMO_NAME',
-        'AP_SEARCH_TERM', 'AP_SEARCH_RESULT', 'AP_SEARCH_NUM',
-        'AP_CART_ITEMCOUNT', 'AP_CART_TOTALPRICE',
-        'AP_ORDER_STEP', 'AP_ORDER_PAYTYPE',
-        'AP_PURCHASE_ORDERNUM', 'AP_PURCHASE_PRICE',
-      ];
-
-      for (const name of varNames) {
-        const value = (window as any)[name];
-        if (value !== undefined && value !== null && value !== '') {
-          vars[name] = String(value);
-        }
-      }
-      return vars;
-    });
-
-    Object.assign(actualVariables, windowVars);
 
     // dataLayer 이벤트 수집
     dataLayerEvents = await page.evaluate(() => {
