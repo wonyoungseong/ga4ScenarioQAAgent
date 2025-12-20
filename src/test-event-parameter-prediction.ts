@@ -17,57 +17,40 @@ import { EventParameterValidator, EventValidationResult, ValidationReport } from
 dotenv.config();
 
 // 테스트할 이벤트 목록 (우선순위 높은 것부터)
+// 조건부 변수 예측이 중요한 이벤트 위주
 const TARGET_EVENTS = [
   'page_view',
-  'view_item',
-  'view_item_list',
-  'add_to_cart',
-  'view_cart',
-  'begin_checkout',
-  'purchase',
-  'view_promotion',
-  'select_promotion',
+  'view_item',          // PRODUCT_DETAIL - 상품 정보 예측
+  'view_item_list',     // PRODUCT_LIST/SEARCH - 검색 정보 예측
+  'view_cart',          // CART - 장바구니 정보 예측
+  'view_promotion',     // MAIN - 프로모션 정보 예측
 ];
 
 // 이벤트별 테스트 페이지 URL (GA4 API 폴백용)
+// AP_DATA 변수가 정상 로딩되는 페이지만 사용
 const DEFAULT_TEST_PAGES: Record<string, string[]> = {
   'page_view': [
     'https://www.amoremall.com/kr/ko/display/main',
     'https://www.amoremall.com/kr/ko/product/detail?onlineProdSn=91736',
-    'https://www.amoremall.com/kr/ko/display/category/100000001',
-    'https://www.amoremall.com/kr/ko/search?keyword=설화수',
-    'https://www.amoremall.com/kr/ko/brand/SULWHASOO',
+    'https://www.amoremall.com/kr/ko/cart/cartList',
   ],
   'view_item': [
+    // PRODUCT_DETAIL 페이지 - 상품 정보 예측 가능
     'https://www.amoremall.com/kr/ko/product/detail?onlineProdSn=91736',
-    'https://www.amoremall.com/kr/ko/product/detail?onlineProdSn=90001',
-    'https://www.amoremall.com/kr/ko/product/detail?onlineProdSn=88888',
-    'https://www.amoremall.com/kr/ko/product/detail?onlineProdSn=87654',
+    'https://www.amoremall.com/kr/ko/product/detail?onlineProdSn=85851',
   ],
   'view_item_list': [
-    'https://www.amoremall.com/kr/ko/display/category/100000001',
-    'https://www.amoremall.com/kr/ko/search?keyword=설화수',
-    'https://www.amoremall.com/kr/ko/display/category/100000002',
-  ],
-  'add_to_cart': [
-    'https://www.amoremall.com/kr/ko/product/detail?onlineProdSn=91736',
-    'https://www.amoremall.com/kr/ko/product/detail?onlineProdSn=90001',
+    // MAIN 페이지에서 상품 리스트 섹션 (상품 리스트 이벤트가 발생하는 다른 페이지)
+    'https://www.amoremall.com/kr/ko/display/main',
   ],
   'view_cart': [
+    // CART 페이지 - 장바구니 정보 예측 가능
     'https://www.amoremall.com/kr/ko/cart/cartList',
-  ],
-  'begin_checkout': [
-    'https://www.amoremall.com/kr/ko/cart/cartList',
-  ],
-  'purchase': [
-    // purchase 이벤트는 로그인이 필요한 ORDER_COMPLETE 페이지에서만 발생하므로 테스트 제외
   ],
   'view_promotion': [
+    // MAIN 페이지 - 프로모션 정보 예측 가능
     'https://www.amoremall.com/kr/ko/display/main',
-    'https://www.amoremall.com/kr/ko/brand/SULWHASOO',
-  ],
-  'select_promotion': [
-    'https://www.amoremall.com/kr/ko/display/main',
+    'https://www.amoremall.com/kr/ko/product/detail?onlineProdSn=91736',
   ],
 };
 
@@ -205,18 +188,39 @@ function predictionToActualFormat(prediction: PageVariablePrediction | null): Re
   // 조건부 변수
   if (prediction.conditionalVariables) {
     const cv = prediction.conditionalVariables;
+    // 상품 관련
     if (cv.product_id) result['AP_PRD_CODE'] = String(cv.product_id);
     if (cv.product_name) result['AP_PRD_NAME'] = cv.product_name;
     if (cv.product_brandname) result['AP_PRD_BRAND'] = cv.product_brandname;
+    if (cv.product_brandcode) result['AP_PRD_BRANDCODE'] = cv.product_brandcode;
     if (cv.product_category) result['AP_PRD_CATEGORY'] = cv.product_category;
     if (cv.product_price) result['AP_PRD_PRICE'] = String(cv.product_price);
+    if (cv.product_prdprice) result['AP_PRD_PRDPRICE'] = String(cv.product_prdprice);
+    if (cv.product_discount) result['AP_PRD_DISCOUNT'] = String(cv.product_discount);
+    if (cv.product_is_stock) result['AP_PRD_ISSTOCK'] = cv.product_is_stock;
+
+    // 검색 관련
     if (cv.search_term) result['AP_SEARCH_TERM'] = cv.search_term;
+    if (cv.search_result) result['AP_SEARCH_RESULT'] = cv.search_result;
     if (cv.search_result_count) result['AP_SEARCH_NUM'] = String(cv.search_result_count);
+
+    // 장바구니 관련
     if (cv.cart_item_count) result['AP_CART_ITEMCOUNT'] = String(cv.cart_item_count);
     if (cv.cart_total_price) result['AP_CART_TOTALPRICE'] = String(cv.cart_total_price);
+
+    // 주문 관련
     if (cv.checkout_step) result['AP_ORDER_STEP'] = String(cv.checkout_step);
+    if (cv.payment_type) result['AP_ORDER_PAYTYPE'] = cv.payment_type;
+    if (cv.transaction_id) result['AP_PURCHASE_ORDERNUM'] = cv.transaction_id;
+    if (cv.transaction_value) result['AP_PURCHASE_PRICE'] = String(cv.transaction_value);
+
+    // 이벤트/프로모션 관련
     if (cv.view_event_code) result['AP_PROMO_ID'] = cv.view_event_code;
     if (cv.view_event_name) result['AP_PROMO_NAME'] = cv.view_event_name;
+
+    // 브랜드샵 관련
+    if (cv.brandshop_code) result['AP_BRAND_CODE'] = cv.brandshop_code;
+    if (cv.brandshop_name) result['AP_BRAND_NAME'] = cv.brandshop_name;
   }
 
   return result;
@@ -296,29 +300,14 @@ async function main() {
     console.log(`🎯 ${eventName}`);
     console.log(`${'═'.repeat(60)}`);
 
-    // 테스트 페이지 결정
-    let testPages: string[] = DEFAULT_TEST_PAGES[eventName] || [];
-
-    // GA4에서 대표 페이지 조회 시도
-    if (scenarioGenerator) {
-      try {
-        const pages = await scenarioGenerator.selectRepresentativePages(eventName);
-        if (pages.length > 0) {
-          testPages = pages.map(p => p.url);
-          console.log(`   📍 GA4에서 ${pages.length}개 대표 페이지 선정`);
-        }
-      } catch (error) {
-        console.log(`   ⚠️ GA4 조회 실패, 기본 페이지 사용`);
-      }
-    }
+    // 테스트 페이지 결정 - AP_DATA 로딩이 확인된 페이지만 사용
+    const testPages: string[] = DEFAULT_TEST_PAGES[eventName] || [];
+    console.log(`   📍 테스트 페이지 ${testPages.length}개 사용`);
 
     if (testPages.length === 0) {
       console.log(`   ⚠️ 테스트 페이지가 없습니다. 스킵합니다.`);
       continue;
     }
-
-    // 최대 5개 페이지만 테스트
-    testPages = testPages.slice(0, 5);
 
     for (let i = 0; i < testPages.length; i++) {
       const url = testPages[i];
