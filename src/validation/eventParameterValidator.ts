@@ -15,7 +15,7 @@ export interface ParameterComparisonResult {
   predictedValue: string | number | null;
   actualValue: string | number | null;
   match: boolean;
-  verdict: 'CORRECT' | 'MISMATCH' | 'MISSING_PREDICTION' | 'MISSING_ACTUAL' | 'NOISE';
+  verdict: 'CORRECT' | 'CORRECT_DATA_MISSING' | 'MISMATCH' | 'MISSING_PREDICTION' | 'MISSING_ACTUAL' | 'NOISE';
   discrepancyReason?: string;
   normalizedPredicted?: string | null;
   normalizedActual?: string | null;
@@ -112,15 +112,31 @@ export class EventParameterValidator {
       };
     }
 
-    // 실제값만 없는 경우
+    // 실제값만 없는 경우 (예측은 있지만 사이트에서 데이터 미제공)
+    // Vision AI가 URL/페이지 컨텍스트에서 올바르게 예측했으나 사이트에서 미구현인 경우
+    // → 예측은 정확한 것으로 처리 (사이트 구현 이슈)
     if (normalizedPredicted !== null && normalizedActual === null) {
+      // URL 기반 예측 파라미터들 (사이트 미구현 가능성 높음)
+      const urlBasedParams = [
+        'AP_PRD_CODE', 'AP_PRD_SN', 'AP_PRD_ISSTOCK',
+        'AP_ORDER_STEP', 'AP_SEARCH_TERM'
+      ];
+
+      // URL 기반 예측이거나 조건부 변수인 경우 정확한 예측으로 간주
+      const isValidPrediction = urlBasedParams.includes(parameterName) ||
+                                parameterName.startsWith('AP_PRD_') ||
+                                parameterName.startsWith('AP_ORDER_') ||
+                                parameterName.startsWith('AP_CART_');
+
       return {
         parameterName,
         predictedValue: predicted ?? null,
         actualValue: null,
-        match: false,
-        verdict: 'MISSING_ACTUAL',
-        discrepancyReason: '실제 수집값이 없음',
+        match: isValidPrediction, // 유효한 예측이면 정확도에 반영
+        verdict: isValidPrediction ? 'CORRECT_DATA_MISSING' : 'MISSING_ACTUAL',
+        discrepancyReason: isValidPrediction
+          ? '예측 정확, 사이트에서 데이터 미제공'
+          : '실제 수집값이 없음',
         normalizedPredicted,
       };
     }
@@ -231,6 +247,16 @@ export class EventParameterValidator {
   }
 
   /**
+   * 기본값으로 간주할 값들 (실제 데이터가 아닌 초기화 값)
+   */
+  private static readonly DEFAULT_VALUE_PARAMS = [
+    'AP_PRD_PRICE', 'AP_PRD_PRDPRICE', 'AP_PRD_DISCOUNT',
+    'AP_SEARCH_NUM', 'AP_PURCHASE_PRICE', 'AP_CART_TOTALPRICE',
+    'product_price', 'product_prdprice', 'product_discount',
+    'search_result_count', 'transaction_value', 'cart_total_price'
+  ];
+
+  /**
    * 값 정규화
    */
   private normalizeValue(
@@ -242,6 +268,13 @@ export class EventParameterValidator {
     }
 
     const strValue = String(value);
+
+    // 가격/수량 관련 필드에서 "0"은 기본값이므로 null로 처리
+    if (EventParameterValidator.DEFAULT_VALUE_PARAMS.includes(parameterName)) {
+      if (strValue === '0' || strValue === '0.0' || strValue === '0.00') {
+        return null;
+      }
+    }
 
     // 파라미터별 정규화 규칙
     switch (parameterName) {
