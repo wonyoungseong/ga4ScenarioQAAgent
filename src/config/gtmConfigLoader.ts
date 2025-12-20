@@ -732,8 +732,8 @@ export class GTMConfigLoader {
     console.log(`  - 이벤트 파라미터 정의: ${config.eventParameters.size}개`);
 
     console.log(`\n📦 통합 파라미터 스토어 (PARAM_MAPPING_TABLE.md):`);
-    console.log(`  - 공통 페이지 파라미터: ${config.unifiedParameterStore.commonPageParams.length}개`);
-    console.log(`  - 공통 사용자 파라미터: ${config.unifiedParameterStore.commonUserParams.length}개`);
+    console.log(`  - 공통 이벤트 파라미터: ${config.unifiedParameterStore.commonEventParams.length}개`);
+    console.log(`  - 사용자 속성: ${config.unifiedParameterStore.userProperties.length}개`);
     console.log(`  - 이벤트: ${config.unifiedParameterStore.events.size}개`);
     console.log(`  - 공통 item 파라미터: ${config.unifiedParameterStore.itemParams.length}개`);
 

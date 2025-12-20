@@ -708,6 +708,153 @@ export class GA4Client {
       analysis,
     };
   }
+
+  /**
+   * 이벤트별 페이지-ContentGroup 분석
+   *
+   * 특정 이벤트가 어떤 content_group에서 주로 발생하는지 분석합니다.
+   * 대표 페이지 선정에 사용됩니다.
+   */
+  async getEventPagesByContentGroup(
+    eventName: string,
+    options: GA4QueryOptions = {}
+  ): Promise<{
+    contentGroup: string;
+    pagePath: string;
+    eventCount: number;
+    proportion: number;
+  }[]> {
+    this.ensureInitialized();
+    const { startDate = '7daysAgo', endDate = 'today', limit = 500 } = options;
+
+    // content_group과 pagePath를 같이 조회
+    const [response] = await this.client!.runReport({
+      property: `properties/${this.propertyId}`,
+      dateRanges: [{ startDate, endDate }],
+      dimensions: [
+        { name: 'pagePath' },
+        { name: 'customEvent:content_group' },
+      ],
+      metrics: [{ name: 'eventCount' }],
+      dimensionFilter: {
+        filter: {
+          fieldName: 'eventName',
+          stringFilter: { value: eventName },
+        },
+      },
+      limit,
+      orderBys: [
+        { metric: { metricName: 'eventCount' }, desc: true },
+      ],
+    });
+
+    const results: Array<{
+      contentGroup: string;
+      pagePath: string;
+      eventCount: number;
+      proportion: number;
+    }> = [];
+
+    let totalCount = 0;
+
+    if (response.rows) {
+      // 먼저 총 카운트 계산
+      for (const row of response.rows) {
+        totalCount += parseInt(row.metricValues?.[0]?.value || '0', 10);
+      }
+
+      // 결과 생성
+      for (const row of response.rows) {
+        const pagePath = row.dimensionValues?.[0]?.value || '';
+        const contentGroup = row.dimensionValues?.[1]?.value || 'OTHERS';
+        const eventCount = parseInt(row.metricValues?.[0]?.value || '0', 10);
+
+        results.push({
+          pagePath,
+          contentGroup: contentGroup === '(not set)' ? 'OTHERS' : contentGroup,
+          eventCount,
+          proportion: totalCount > 0 ? eventCount / totalCount : 0,
+        });
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * 이벤트별 파라미터 값 조회
+   *
+   * 특정 이벤트의 특정 파라미터가 어떤 값으로 수집되었는지 조회합니다.
+   */
+  async getEventParameterValues(
+    eventName: string,
+    parameterName: string,
+    options: GA4QueryOptions = {}
+  ): Promise<{
+    value: string;
+    eventCount: number;
+    proportion: number;
+  }[]> {
+    this.ensureInitialized();
+    const { startDate = '7daysAgo', endDate = 'today', limit = 100 } = options;
+
+    // customEvent: prefix로 파라미터 조회
+    const dimensionName = parameterName.startsWith('customEvent:')
+      ? parameterName
+      : `customEvent:${parameterName}`;
+
+    try {
+      const [response] = await this.client!.runReport({
+        property: `properties/${this.propertyId}`,
+        dateRanges: [{ startDate, endDate }],
+        dimensions: [{ name: dimensionName }],
+        metrics: [{ name: 'eventCount' }],
+        dimensionFilter: {
+          filter: {
+            fieldName: 'eventName',
+            stringFilter: { value: eventName },
+          },
+        },
+        limit,
+        orderBys: [
+          { metric: { metricName: 'eventCount' }, desc: true },
+        ],
+      });
+
+      const results: Array<{
+        value: string;
+        eventCount: number;
+        proportion: number;
+      }> = [];
+
+      let totalCount = 0;
+
+      if (response.rows) {
+        for (const row of response.rows) {
+          totalCount += parseInt(row.metricValues?.[0]?.value || '0', 10);
+        }
+
+        for (const row of response.rows) {
+          const value = row.dimensionValues?.[0]?.value || '';
+          const eventCount = parseInt(row.metricValues?.[0]?.value || '0', 10);
+
+          if (value && value !== '(not set)') {
+            results.push({
+              value,
+              eventCount,
+              proportion: totalCount > 0 ? eventCount / totalCount : 0,
+            });
+          }
+        }
+      }
+
+      return results;
+    } catch (error: any) {
+      // 파라미터가 Custom Dimension으로 등록되지 않은 경우
+      console.warn(`파라미터 조회 실패 (${parameterName}): ${error.message}`);
+      return [];
+    }
+  }
 }
 
 /**

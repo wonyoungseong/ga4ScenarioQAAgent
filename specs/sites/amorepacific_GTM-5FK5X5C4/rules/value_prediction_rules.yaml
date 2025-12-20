@@ -1,0 +1,697 @@
+# page_view 파라미터 Value 예측 규칙 (v2.0)
+# Vision AI 및 시나리오 에이전트가 참조
+# 최종 수정: 2024-12-19
+
+version: "2.0.0"
+event: "page_view"
+site: "amorepacific_GTM-5FK5X5C4"
+total_parameters: 45
+
+# =============================================================================
+# Event Parameters (35개)
+# =============================================================================
+event_parameters:
+  # ---------------------------------------------------------------------------
+  # 1. site_name - URL 도메인 매핑
+  # ---------------------------------------------------------------------------
+  - index: 1
+    key: site_name
+    dev_var: AP_DATA_SITENAME
+    prediction_type: url_domain_mapping
+    prediction_method: |
+      URL 도메인 매핑 - PDF 사이트 테이블 참조
+      예: amoremall.com → APMALL
+          innisfree.com → INNISFREE
+          sulwhasoo.com → SULWHASOO
+    examples:
+      - url: "https://www.amoremall.com/kr/ko/display/main"
+        value: "APMALL"
+      - url: "https://www.innisfree.com/kr/ko/Main.do"
+        value: "INNISFREE"
+
+  # ---------------------------------------------------------------------------
+  # 2. site_country - URL에서 추출
+  # ---------------------------------------------------------------------------
+  - index: 2
+    key: site_country
+    dev_var: AP_DATA_COUNTRY
+    prediction_type: url_extraction
+    prediction_method: |
+      URL에서 추출 - /kr/, /jp/, /cn/ 등
+      없으면 도메인 또는 화면 언어로 추정 (ISO 3166-1)
+      특정 국가 특정할 수 없고 언어가 영어이고 URL에 INT가 들어가면 GL
+    rules:
+      - pattern: "/kr/"
+        value: "KR"
+      - pattern: "/jp/"
+        value: "JP"
+      - pattern: "/cn/"
+        value: "CN"
+      - pattern: "/int/"
+        condition: "language == EN"
+        value: "GL"
+      - pattern: ".com.cn"
+        value: "CN"
+      - pattern: ".co.kr"
+        value: "KR"
+    fallback: "화면 언어 기반 추정"
+
+  # ---------------------------------------------------------------------------
+  # 3. site_language - URL에서 추출
+  # ---------------------------------------------------------------------------
+  - index: 3
+    key: site_language
+    dev_var: AP_DATA_LANG
+    prediction_type: url_extraction
+    prediction_method: |
+      URL에서 추출 - /ko/, /en/, /ja/ 등
+      없으면 html lang 또는 화면 언어로 추정 (ISO 639-1)
+    rules:
+      - pattern: "/ko/"
+        value: "KO"
+      - pattern: "/en/"
+        value: "EN"
+      - pattern: "/ja/"
+        value: "JA"
+      - pattern: "/zh/"
+        value: "ZH"
+      - pattern: "/vi/"
+        value: "VI"
+      - pattern: "/th/"
+        value: "TH"
+      - pattern: "/id/"
+        value: "ID"
+    fallback: "html lang 속성 또는 화면 언어 기반"
+
+  # ---------------------------------------------------------------------------
+  # 4. site_env - URL 패턴으로 환경 감지
+  # ---------------------------------------------------------------------------
+  - index: 4
+    key: site_env
+    dev_var: AP_DATA_ENV
+    prediction_type: url_pattern
+    prediction_method: |
+      고정값 PRD (운영환경)
+      URL에 DEV 있으면 dev, stg 있으면 stg, local 있으면 local, beta 있으면 beta
+      subdomain에 테스트처럼 보이는 도메인이 있으면 의심
+    rules:
+      - pattern: "dev"
+        value: "DEV"
+      - pattern: "stg"
+        value: "STG"
+      - pattern: "local"
+        value: "LOCAL"
+      - pattern: "beta"
+        value: "BETA"
+      - pattern: "test"
+        value: "DEV"
+    default: "PRD"
+
+  # ---------------------------------------------------------------------------
+  # 5. channel - User-Agent 기반
+  # ---------------------------------------------------------------------------
+  - index: 5
+    key: channel
+    dev_var: AP_DATA_CHANNEL
+    prediction_type: user_agent
+    prediction_method: |
+      User-Agent 기반
+      Mobile/Android/iPhone 포함 → MOBILE
+      그 외 → PC
+    rules:
+      - ua_contains: ["Mobile", "Android", "iPhone", "iPad"]
+        value: "MOBILE"
+    default: "PC"
+
+  # ---------------------------------------------------------------------------
+  # 6. content_group - URL 패턴 + Vision AI
+  # ---------------------------------------------------------------------------
+  - index: 6
+    key: content_group
+    dev_var: AP_DATA_PAGETYPE
+    prediction_type: url_pattern_and_vision
+    prediction_method: |
+      URL 패턴 + Vision AI - PDF 13가지 값 중 하나
+    allowed_values:
+      - value: "MAIN"
+        description: "메인 페이지"
+        required: true
+      - value: "BRAND_MAIN"
+        description: "브랜드 메인 페이지 (AP몰만 해당)"
+        required: false
+      - value: "PRODUCT_DETAIL"
+        description: "상품 상세 페이지"
+        required: true
+      - value: "PRODUCT_LIST"
+        description: "상품 리스트 페이지"
+        required: false
+      - value: "SEARCH_RESULT"
+        description: "검색 결과 페이지"
+        required: true
+      - value: "CART"
+        description: "장바구니 페이지"
+        required: false
+      - value: "ORDER"
+        description: "주문서 페이지"
+        required: false
+      - value: "MY"
+        description: "마이 페이지"
+        required: false
+      - value: "EVENT_LIST"
+        description: "이벤트 리스트 페이지"
+        required: false
+      - value: "EVENT_DETAIL"
+        description: "이벤트 상세 페이지"
+        required: true
+      - value: "LIVE_LIST"
+        description: "라이브 리스트 (라이브 콘텐츠가 있는 사이트만)"
+        required: false
+      - value: "LIVE_DETAIL"
+        description: "라이브 상세 페이지 (라이브 콘텐츠가 있는 사이트만)"
+        required: true
+      - value: "OTHERS"
+        description: "그 외 모두"
+        required: false
+
+  # ---------------------------------------------------------------------------
+  # 7. login_is_login - 로그인 상태
+  # ---------------------------------------------------------------------------
+  - index: 7
+    key: login_is_login
+    dev_var: AP_DATA_ISLOGIN
+    prediction_type: login_state
+    prediction_method: |
+      로그인 상태 감지
+      비로그인: N, 로그인: Y
+    detection:
+      logged_in: "마이페이지 링크, 로그아웃 버튼, 사용자 이름 표시"
+      logged_out: "로그인 버튼 표시"
+    values:
+      logged_out: "N"
+      logged_in: "Y"
+
+  # ---------------------------------------------------------------------------
+  # 8. user_agent - 브라우저 자동
+  # ---------------------------------------------------------------------------
+  - index: 8
+    key: user_agent
+    dev_var: "(브라우저)"
+    prediction_type: browser_auto
+    prediction_method: |
+      브라우저 자동 - navigator.userAgent
+    prediction_skip: true
+
+  # ---------------------------------------------------------------------------
+  # 9. traffic_type - 내부 로직
+  # ---------------------------------------------------------------------------
+  - index: 9
+    key: traffic_type
+    dev_var: "(내부)"
+    prediction_type: internal_logic
+    prediction_method: |
+      내부 로직 - IP 기반
+      일반적으로 external
+    default: "external"
+
+  # ---------------------------------------------------------------------------
+  # 10. page_referrer - 브라우저 자동
+  # ---------------------------------------------------------------------------
+  - index: 10
+    key: page_referrer
+    dev_var: "(브라우저)"
+    prediction_type: browser_auto
+    prediction_method: |
+      브라우저 자동 - document.referrer
+    prediction_skip: true
+
+  # ---------------------------------------------------------------------------
+  # 11-15. page_location_1~5 - Full URL 분할
+  # ---------------------------------------------------------------------------
+  - index: 11
+    key: page_location_1
+    dev_var: "(GTM)"
+    prediction_type: url_split
+    prediction_method: |
+      Full URL의 1-100자
+    extraction:
+      source: "full_url"
+      start: 0
+      end: 100
+
+  - index: 12
+    key: page_location_2
+    dev_var: "(GTM)"
+    prediction_type: url_split
+    prediction_method: |
+      Full URL의 101-200자
+    extraction:
+      source: "full_url"
+      start: 100
+      end: 200
+
+  - index: 13
+    key: page_location_3
+    dev_var: "(GTM)"
+    prediction_type: url_split
+    prediction_method: |
+      Full URL의 201-300자
+    extraction:
+      source: "full_url"
+      start: 200
+      end: 300
+
+  - index: 14
+    key: page_location_4
+    dev_var: "(GTM)"
+    prediction_type: url_split
+    prediction_method: |
+      Full URL의 301-400자
+    extraction:
+      source: "full_url"
+      start: 300
+      end: 400
+
+  - index: 15
+    key: page_location_5
+    dev_var: "(GTM)"
+    prediction_type: url_split
+    prediction_method: |
+      Full URL의 401-500자
+    extraction:
+      source: "full_url"
+      start: 400
+      end: 500
+
+  # ---------------------------------------------------------------------------
+  # 16-21. 로그인 ID 관련 (로그인 시에만)
+  # ---------------------------------------------------------------------------
+  - index: 16
+    key: login_id_gcid
+    dev_var: AP_DATA_GCID
+    prediction_type: login_only
+    prediction_method: |
+      로그인 시에만 - 통합회원 아이디 정보의 SHA512 해시 128자
+    format: sha512_hash
+    length: 128
+    condition: "login_is_login == Y"
+
+  - index: 17
+    key: login_id_cid
+    dev_var: AP_DATA_CID
+    prediction_type: login_only
+    prediction_method: |
+      로그인 시에만 - 통합회원 번호의 SHA512 해시 128자
+    format: sha512_hash
+    length: 128
+    condition: "login_is_login == Y"
+
+  - index: 18
+    key: login_id_gcid_1
+    dev_var: "(분할)"
+    prediction_type: login_only
+    prediction_method: |
+      로그인 시에만 - gcid 전반부 100자
+    derived_from: login_id_gcid
+    extraction:
+      start: 0
+      end: 100
+    condition: "login_is_login == Y"
+
+  - index: 19
+    key: login_id_gcid_2
+    dev_var: "(분할)"
+    prediction_type: login_only
+    prediction_method: |
+      로그인 시에만 - gcid 후반부 101자 이후
+    derived_from: login_id_gcid
+    extraction:
+      start: 100
+      end: null
+    condition: "login_is_login == Y"
+
+  - index: 20
+    key: login_id_cid_1
+    dev_var: "(분할)"
+    prediction_type: login_only
+    prediction_method: |
+      로그인 시에만 - cid 전반부 100자
+    derived_from: login_id_cid
+    extraction:
+      start: 0
+      end: 100
+    condition: "login_is_login == Y"
+
+  - index: 21
+    key: login_id_cid_2
+    dev_var: "(분할)"
+    prediction_type: login_only
+    prediction_method: |
+      로그인 시에만 - cid 후반부 101자 이후
+    derived_from: login_id_cid
+    extraction:
+      start: 100
+      end: null
+    condition: "login_is_login == Y"
+
+  # ---------------------------------------------------------------------------
+  # 22-27. PRODUCT_DETAIL 전용
+  # ---------------------------------------------------------------------------
+  - index: 22
+    key: product_id
+    dev_var: "(GTM)"
+    prediction_type: page_conditional
+    prediction_method: |
+      PRODUCT_DETAIL만 - 상품 코드
+      pageURL의 onlineProdCode (최우선), onlineProdSn (2순위)
+      상품 상세페이지 URL에 있는 제품ID 값
+    condition: "content_group == PRODUCT_DETAIL"
+    extraction:
+      priority:
+        - source: url_query
+          param: onlineProdCode
+        - source: url_query
+          param: onlineProdSn
+        - source: url_path
+          pattern: "/product/{product_id}"
+
+  - index: 23
+    key: product_name
+    dev_var: "(GTM)"
+    prediction_type: page_conditional
+    prediction_method: |
+      PRODUCT_DETAIL만 - 상품명
+      pageTitle, screen title, 제품이미지에 적힌 제품명
+      이름이 항상 일치하지 않을 수 있음
+    condition: "content_group == PRODUCT_DETAIL"
+    extraction:
+      sources:
+        - page_title
+        - screen_title
+        - vision_product_name
+
+  - index: 24
+    key: product_category
+    dev_var: "(GTM)"
+    prediction_type: page_conditional
+    prediction_method: |
+      PRODUCT_DETAIL만 - 상품 카테고리
+      제품명과 브랜드명 제외한 제품의 카테고리
+      상품을 보고 어떤 카테고리인지 예측하는 것도 필요
+      제품명에 들어가있으면 제품명을 통해 추론 필요
+    condition: "content_group == PRODUCT_DETAIL"
+    extraction:
+      sources:
+        - breadcrumb
+        - vision_inference_from_product
+
+  - index: 25
+    key: product_brandname
+    dev_var: "(GTM)"
+    prediction_type: page_conditional
+    prediction_method: |
+      PRODUCT_DETAIL만 - 브랜드명
+      제품명에서 추론
+      상품 카테고리가 아니고 상품명도 아니고 브랜드명
+    condition: "content_group == PRODUCT_DETAIL"
+    extraction:
+      sources:
+        - vision_brand_logo
+        - product_name_inference
+
+  - index: 26
+    key: product_brandcode
+    dev_var: "(GTM)"
+    prediction_type: page_conditional
+    prediction_method: |
+      PRODUCT_DETAIL만 - 브랜드 코드
+      추론은 어렵지만 URL에 KEY값으로 예측해볼 수 있음
+    condition: "content_group == PRODUCT_DETAIL"
+    extraction:
+      sources:
+        - url_query_key
+
+  - index: 27
+    key: product_is_stock
+    dev_var: "(GTM)"
+    prediction_type: page_conditional
+    prediction_method: |
+      PRODUCT_DETAIL만 - 재고여부 Y/N
+    condition: "content_group == PRODUCT_DETAIL"
+    detection:
+      out_of_stock: ["품절", "sold out", "재고없음"]
+      in_stock: "구매하기 버튼 활성화"
+    values:
+      in_stock: "Y"
+      out_of_stock: "N"
+
+  # ---------------------------------------------------------------------------
+  # 28-29. EVENT_DETAIL 전용
+  # ---------------------------------------------------------------------------
+  - index: 28
+    key: view_event_code
+    dev_var: "(GTM)"
+    prediction_type: page_conditional
+    prediction_method: |
+      EVENT_DETAIL만 - 이벤트 코드
+      PAGE URL에 query string으로 존재할 수 있음
+    condition: "content_group == EVENT_DETAIL"
+    extraction:
+      source: url_query_string
+
+  - index: 29
+    key: view_event_name
+    dev_var: "(GTM)"
+    prediction_type: page_conditional
+    prediction_method: |
+      EVENT_DETAIL만 - 이벤트명
+      이벤트페이지의 title 제목이나 화면에 이름이 있음
+    condition: "content_group == EVENT_DETAIL"
+    extraction:
+      sources:
+        - page_title
+        - vision_event_title
+
+  # ---------------------------------------------------------------------------
+  # 30-31. BRAND_MAIN 전용
+  # ---------------------------------------------------------------------------
+  - index: 30
+    key: brandshop_code
+    dev_var: "(GTM)"
+    prediction_type: page_conditional
+    prediction_method: |
+      BRAND_MAIN만 - 브랜드샵 코드
+      PAGE URL에 query string으로 존재할 수 있음
+    condition: "content_group == BRAND_MAIN"
+    extraction:
+      source: url_query_string
+
+  - index: 31
+    key: brandshop_name
+    dev_var: "(GTM)"
+    prediction_type: page_conditional
+    prediction_method: |
+      BRAND_MAIN만 - 브랜드샵명
+      페이지에 어떤 브랜드인지 맥락적으로 설명할 수 있음
+    condition: "content_group == BRAND_MAIN"
+    extraction:
+      sources:
+        - vision_brand_context
+        - page_title
+
+  # ---------------------------------------------------------------------------
+  # 32-33. 매장 페이지 전용
+  # ---------------------------------------------------------------------------
+  - index: 32
+    key: page_store_code
+    dev_var: "(GTM)"
+    prediction_type: page_conditional
+    prediction_method: |
+      매장 페이지만 - 매장 코드
+      PAGE URL에 query string으로 존재할 수 있음
+    condition: "페이지가 매장 관련"
+    extraction:
+      source: url_query_string
+
+  - index: 33
+    key: page_store_name
+    dev_var: "(GTM)"
+    prediction_type: page_conditional
+    prediction_method: |
+      매장 페이지만 - 매장명
+      페이지에 어떤 브랜드인지 맥락적으로 설명할 수 있음
+    condition: "페이지가 매장 관련"
+    extraction:
+      sources:
+        - vision_store_context
+        - page_title
+
+  # ---------------------------------------------------------------------------
+  # 34-35. SEARCH_RESULT 전용
+  # ---------------------------------------------------------------------------
+  - index: 34
+    key: search_brand_code
+    dev_var: "(GTM)"
+    prediction_type: page_conditional
+    prediction_method: |
+      SEARCH_RESULT만 - 검색 브랜드 코드
+      PAGE URL에 query string으로 존재할 수 있음
+    condition: "content_group == SEARCH_RESULT"
+    extraction:
+      source: url_query_string
+
+  - index: 35
+    key: search_brand
+    dev_var: "(GTM)"
+    prediction_type: page_conditional
+    prediction_method: |
+      SEARCH_RESULT만 - 검색 브랜드명
+      페이지에 어떤 브랜드인지 맥락적으로 설명할 수 있음
+    condition: "content_group == SEARCH_RESULT"
+    extraction:
+      sources:
+        - url_query
+        - vision_search_filter
+
+# =============================================================================
+# User Properties (10개)
+# =============================================================================
+user_properties:
+  - index: 36
+    key: user_id
+    dev_var: AP_DATA_GCID
+    prediction_type: login_only
+    prediction_method: |
+      로그인 시에만 - 통합회원 아이디 정보의 SHA512 해시 128자
+    format: sha512_hash
+    length: 128
+    condition: "login_is_login == Y"
+
+  - index: 37
+    key: login_is_sso
+    dev_var: AP_DATA_ISSSO
+    prediction_type: login_only
+    prediction_method: |
+      로그인 시에만 - SSO 로그인 여부 Y/N
+    allowed_values: ["Y", "N"]
+    condition: "login_is_login == Y"
+
+  - index: 38
+    key: login_gender
+    dev_var: AP_DATA_CG
+    prediction_type: login_only
+    prediction_method: |
+      로그인 시에만 - 성별 M/F
+    allowed_values: ["M", "F"]
+    condition: "login_is_login == Y"
+
+  - index: 39
+    key: login_birth
+    dev_var: AP_DATA_CD
+    prediction_type: login_only
+    prediction_method: |
+      로그인 시에만 - 생년 YYYY (예: 1988)
+    format: year
+    pattern: "^(19|20)\\d{2}$"
+    condition: "login_is_login == Y"
+
+  - index: 40
+    key: login_age
+    dev_var: AP_DATA_AGE
+    prediction_type: login_only
+    prediction_method: |
+      로그인 시에만 - 연령대 숫자
+    format: number
+    condition: "login_is_login == Y"
+
+  - index: 41
+    key: login_level
+    dev_var: AP_DATA_CT
+    prediction_type: login_only
+    prediction_method: |
+      로그인 시에만 - 회원등급 (A 등급, E 등급, WELCOME 등)
+    allowed_values: ["A 등급", "E 등급", "WELCOME", "VIP"]
+    condition: "login_is_login == Y"
+
+  - index: 42
+    key: login_beauty_level
+    dev_var: AP_DATA_BEAUTYCT
+    prediction_type: login_only
+    prediction_method: |
+      로그인 시에만 - 뷰티포인트 등급 (FAMILY, PLATINUM 등)
+    allowed_values: ["FAMILY", "FRIENDS", "PLATINUM", "DIAMOND"]
+    condition: "login_is_login == Y"
+
+  - index: 43
+    key: login_is_member
+    dev_var: AP_DATA_ISEMPLOYEE
+    prediction_type: login_only
+    prediction_method: |
+      로그인 시에만 - 임직원 여부 Y/N
+    allowed_values: ["Y", "N"]
+    condition: "login_is_login == Y"
+
+  - index: 44
+    key: login_method
+    dev_var: AP_DATA_LOGINTYPE
+    prediction_type: login_only
+    prediction_method: |
+      로그인 시에만 - 로그인 방법 (NORMAL, KAKAO, AUTO 등)
+    allowed_values: ["NORMAL", "KAKAO", "NAVER", "APPLE", "AUTO"]
+    condition: "login_is_login == Y"
+
+  - index: 45
+    key: login_is_subscription
+    dev_var: AP_DATA_ISSUBSCRIPTION
+    prediction_type: login_only
+    prediction_method: |
+      로그인 시에만 - 정기배송 구독 여부 Y/N
+    allowed_values: ["Y", "N"]
+    condition: "login_is_login == Y"
+
+# =============================================================================
+# 예측 유형 요약
+# =============================================================================
+prediction_types_summary:
+  url_domain_mapping:
+    description: "URL 도메인으로 값 매핑"
+    parameters: [site_name]
+
+  url_extraction:
+    description: "URL 경로에서 값 추출"
+    parameters: [site_country, site_language]
+
+  url_pattern:
+    description: "URL 패턴으로 값 결정"
+    parameters: [site_env]
+
+  user_agent:
+    description: "User-Agent 문자열 분석"
+    parameters: [channel]
+
+  url_pattern_and_vision:
+    description: "URL 패턴 + Vision AI 화면 분석"
+    parameters: [content_group]
+
+  login_state:
+    description: "로그인 상태 감지"
+    parameters: [login_is_login]
+
+  browser_auto:
+    description: "브라우저 자동 수집 (예측 불필요)"
+    parameters: [user_agent, page_referrer]
+
+  internal_logic:
+    description: "내부 로직으로 결정 (예측 어려움)"
+    parameters: [traffic_type]
+
+  url_split:
+    description: "Full URL을 100자씩 분할"
+    parameters: [page_location_1, page_location_2, page_location_3, page_location_4, page_location_5]
+
+  login_only:
+    description: "로그인 시에만 값 존재"
+    parameters: [login_id_gcid, login_id_cid, login_id_gcid_1, login_id_gcid_2, login_id_cid_1, login_id_cid_2, user_id, login_is_sso, login_gender, login_birth, login_age, login_level, login_beauty_level, login_is_member, login_method, login_is_subscription]
+
+  page_conditional:
+    description: "특정 페이지 타입에서만 값 존재"
+    parameters: [product_id, product_name, product_category, product_brandname, product_brandcode, product_is_stock, view_event_code, view_event_name, brandshop_code, brandshop_name, page_store_code, page_store_name, search_brand_code, search_brand]
