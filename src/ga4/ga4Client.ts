@@ -2,15 +2,16 @@
  * GA4 Data API Client
  *
  * Google Analytics 4에서 실제 수집된 이벤트와 파라미터를 조회합니다.
- * OAuth 2.0 인증을 사용합니다 (일반 사용자 계정).
+ * OAuth 2.0 또는 서비스 계정 인증을 지원합니다.
  */
 
 import { BetaAnalyticsDataClient } from '@google-analytics/data';
-import { OAuth2Client, Credentials } from 'google-auth-library';
+import { OAuth2Client, Credentials, GoogleAuth } from 'google-auth-library';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as http from 'http';
 import * as url from 'url';
+import { ServiceAccountAuth, ServiceAccountConfig, GA4_SCOPES } from './serviceAccountAuth';
 
 export interface GA4Event {
   eventName: string;
@@ -63,12 +64,22 @@ export interface GA4OAuthConfig {
   redirectUri?: string;
 }
 
+export type GA4AuthType = 'oauth' | 'service_account';
+
 export interface GA4ClientConfig {
   propertyId: string;
-  accessToken?: string;         // 직접 Access Token 전달
-  refreshToken?: string;        // Refresh Token
-  oauthConfig?: GA4OAuthConfig; // OAuth 설정
-  tokenPath?: string;           // 토큰 저장 경로
+  /** 인증 타입 (기본값: 'oauth') */
+  authType?: GA4AuthType;
+  /** 직접 Access Token 전달 (OAuth) */
+  accessToken?: string;
+  /** Refresh Token (OAuth) */
+  refreshToken?: string;
+  /** OAuth 설정 */
+  oauthConfig?: GA4OAuthConfig;
+  /** 토큰 저장 경로 (OAuth) */
+  tokenPath?: string;
+  /** 서비스 계정 설정 (authType: 'service_account' 일 때) */
+  serviceAccountConfig?: ServiceAccountConfig;
 }
 
 const SCOPES = ['https://www.googleapis.com/auth/analytics.readonly'];
@@ -77,12 +88,15 @@ const DEFAULT_TOKEN_PATH = './credentials/ga4_tokens.json';
 export class GA4Client {
   private client: BetaAnalyticsDataClient | null = null;
   private oauth2Client: OAuth2Client | null = null;
+  private serviceAccountAuth: ServiceAccountAuth | null = null;
   private propertyId: string;
   private tokenPath: string;
+  private authType: GA4AuthType;
 
   constructor(private config: GA4ClientConfig) {
     this.propertyId = config.propertyId;
     this.tokenPath = config.tokenPath || DEFAULT_TOKEN_PATH;
+    this.authType = config.authType || 'oauth';
   }
 
   /**
@@ -206,6 +220,39 @@ export class GA4Client {
    * GA4 클라이언트 초기화 (인증 포함)
    */
   async initialize(): Promise<void> {
+    // 서비스 계정 인증
+    if (this.authType === 'service_account') {
+      await this.initializeWithServiceAccount();
+      return;
+    }
+
+    // OAuth 인증
+    await this.initializeWithOAuth();
+  }
+
+  /**
+   * 서비스 계정으로 초기화
+   */
+  private async initializeWithServiceAccount(): Promise<void> {
+    this.serviceAccountAuth = new ServiceAccountAuth({
+      ...this.config.serviceAccountConfig,
+      scopes: GA4_SCOPES,
+    });
+
+    await this.serviceAccountAuth.initialize();
+
+    // GoogleAuth를 사용하여 클라이언트 생성
+    const googleAuth = this.serviceAccountAuth.createGoogleAuth();
+
+    this.client = new BetaAnalyticsDataClient({
+      auth: googleAuth,
+    });
+  }
+
+  /**
+   * OAuth로 초기화
+   */
+  private async initializeWithOAuth(): Promise<void> {
     // 1. 직접 Access Token이 제공된 경우
     if (this.config.accessToken) {
       const oauth2Client = new OAuth2Client();
@@ -243,6 +290,20 @@ export class GA4Client {
     }
 
     throw new Error('인증 방법이 제공되지 않았습니다. accessToken 또는 oauthConfig를 설정하세요.');
+  }
+
+  /**
+   * 서비스 계정 이메일 반환 (서비스 계정 인증 시)
+   */
+  getServiceAccountEmail(): string | null {
+    return this.serviceAccountAuth?.getServiceAccountEmail() || null;
+  }
+
+  /**
+   * 현재 인증 타입 반환
+   */
+  getAuthType(): GA4AuthType {
+    return this.authType;
   }
 
   /**
