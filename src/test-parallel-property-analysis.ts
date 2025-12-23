@@ -434,8 +434,44 @@ async function analyzePageParallel(
 
   // Vision AI 예측과 실제 변수 비교
   const visionVars = visionPrediction?.variables || null;
+  const visionConditionalVars = visionPrediction?.conditionalVariables || null;
   const { comparisons: variableComparisons, accuracy: variableAccuracy, matchedCount: varMatched, totalCount: varTotal } =
     compareVisionWithActual(visionVars, actualVariables);
+
+  // Vision AI 조건부 변수에서 이벤트 파라미터로 매핑
+  // Vision AI가 예측하는 키 → GTM 이벤트 파라미터 키
+  const visionToEventParamMapping: Record<string, string[]> = {
+    'product_id': ['product_id', 'item_id', 'product_code'],
+    'product_name': ['product_name', 'item_name', 'product_prdname'],
+    'product_brandname': ['product_brandname', 'item_brand', 'product_brand'],
+    'product_brandcode': ['product_brandcode', 'brand_code'],
+    'product_category': ['product_category', 'item_category', 'category'],
+    'product_price': ['product_price', 'price', 'product_saleprice'],
+    'product_prdprice': ['product_prdprice', 'original_price'],
+    'product_discount': ['product_discount', 'discount'],
+    'product_is_stock': ['product_is_stock', 'is_stock'],
+    'search_term': ['search_term', 'search_keyword'],
+    'search_result': ['search_result'],
+    'search_result_count': ['search_result_count', 'search_resultcount', 'search_num'],
+    'search_type': ['search_type'],
+    'search_brand_code': ['search_brand_code'],
+    'search_brand': ['search_brand'],
+    'cart_item_count': ['cart_item_count'],
+    'cart_total_price': ['cart_total_price'],
+    'checkout_step': ['checkout_step'],
+    'transaction_id': ['transaction_id', 'order_id'],
+    'transaction_value': ['transaction_value', 'value'],
+    'payment_type': ['payment_type'],
+    'currency': ['currency'],
+  };
+
+  // 역매핑: GTM 파라미터 → Vision AI 키
+  const eventParamToVisionMapping: Record<string, string> = {};
+  for (const [visionKey, paramKeys] of Object.entries(visionToEventParamMapping)) {
+    for (const paramKey of paramKeys) {
+      eventParamToVisionMapping[paramKey.toLowerCase()] = visionKey;
+    }
+  }
 
   // 이벤트 파라미터 상세 비교
   const eventDetails: EventDetail[] = [];
@@ -458,9 +494,25 @@ async function analyzePageParallel(
           const paramKey = param.key.toLowerCase();
           const gtmVariable = param.valueSource || '';
 
-          // Vision AI 예측값
-          const predictedValue = visionVars?.[paramKey] ||
-                                visionVars?.[param.key] || null;
+          // Vision AI 예측값 (공통 변수 + 조건부 변수 모두 확인)
+          // 1. 공통 변수에서 먼저 확인
+          let predictedValue = visionVars?.[paramKey] ||
+                               visionVars?.[param.key] || null;
+
+          // 2. 조건부 변수에서 확인 (product_*, search_* 등)
+          if (!predictedValue && visionConditionalVars) {
+            // 직접 키 매칭
+            predictedValue = visionConditionalVars[paramKey] ||
+                            visionConditionalVars[param.key] || null;
+
+            // Vision AI 키 매핑을 통한 확인
+            if (!predictedValue) {
+              const visionKey = eventParamToVisionMapping[paramKey];
+              if (visionKey) {
+                predictedValue = visionConditionalVars[visionKey] || null;
+              }
+            }
+          }
 
           // 이벤트별 매핑에서 AP_* 변수명 찾기
           let developedValue: string | null = null;
@@ -517,16 +569,19 @@ async function analyzePageParallel(
           const ga4Value = ga4CollectedValues[paramKey] ||
                           ga4CollectedValues[param.key] || null;
 
-          // 매칭 여부 확인
+          // 매칭 여부 확인 (어느 소스에서든 값이 있으면 확인된 것)
           let matched = false;
           let source: 'vision' | 'ap_data' | 'ga4' | 'none' = 'none';
 
+          // 우선순위: AP_DATA > Vision AI > GA4
           if (developedValue) {
             matched = true;
             source = 'ap_data';
           } else if (predictedValue) {
+            matched = true;  // Vision AI 예측도 유효한 확인으로 처리
             source = 'vision';
           } else if (ga4Value) {
+            matched = true;  // GA4 수집값도 유효한 확인으로 처리
             source = 'ga4';
           }
 

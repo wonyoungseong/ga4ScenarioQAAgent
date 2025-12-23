@@ -1544,16 +1544,23 @@ ${expectedChannel !== 'DETECT_FROM_SCREENSHOT' ? `- channel: "${expectedChannel}
 
 **STORE**: page_store_code, page_store_name
 
-## 중요
+## 중요 - 반드시 따르세요
 1. site_name, site_env, channel은 위에서 지정한 고정값 그대로 사용
 2. 페이지 타입은 팝업을 무시하고 메인 콘텐츠로 판단
 3. 이벤트 팝업이 있어도 배경이 메인 페이지면 MAIN
 4. **pageLocationVariables는 breadcrumb이 보일 때만 채우세요** (없으면 모두 null)
-5. **conditionalVariables는 해당 페이지 타입의 모든 파라미터를 채우세요**
-   - 화면에서 확인 가능한 값은 실제 값
-   - 확인 불가능하면 null
-   - 숫자 파라미터는 숫자만 (예: 45000, 쉼표/원 제외)
-6. **product_id, view_event_code 등은 URL에서 추출 가능한 경우 반드시 추출**`;
+5. **conditionalVariables는 반드시 화면에서 읽어서 채우세요**:
+   - **product_name**: 화면에서 가장 큰 상품명 텍스트를 그대로 복사 (예: "설화수 윤조에센스 90ml")
+   - **product_brandname**: 상품명 근처의 브랜드명 텍스트 (예: "설화수", "라네즈", "이니스프리")
+   - **product_price**: 판매가 숫자만 추출 (예: "45,000원" → 45000)
+   - **product_prdprice**: 정가/원가 숫자만 (할인 전 가격, 취소선 있는 가격)
+   - **product_category**: 브레드크럼이나 카테고리 표시 텍스트
+   - **search_term**: 검색창에 입력된 검색어 텍스트
+   - **search_result_count**: "총 123개 결과" 같은 텍스트에서 숫자만 추출
+   - 화면에서 명확히 보이는 텍스트는 반드시 추출하세요
+   - 화면에서 확인 불가능한 경우에만 null
+6. **product_id, view_event_code 등은 URL에서 추출** (onlineProdSn, product_no, /product/숫자 등)
+7. **null이 아닌 실제 값 우선**: 화면에 상품명, 가격이 보이면 반드시 해당 값을 입력하세요`;
 
     try {
       const result = await this.model.generateContent([
@@ -1588,6 +1595,269 @@ ${expectedChannel !== 'DETECT_FROM_SCREENSHOT' ? `- channel: "${expectedChannel}
       throw error;
     }
   }
+
+  /**
+   * 스크린샷에서 클릭 가능한 영역을 분석하고
+   * 각 영역의 예상 selector와 HTML 속성을 예측합니다.
+   *
+   * @param screenshotPath 스크린샷 경로
+   * @param pageUrl 페이지 URL
+   * @param htmlSnippet (선택) 페이지 HTML 일부 (정확도 향상용)
+   * @returns 클릭 영역 분석 결과
+   */
+  async analyzeClickableElements(
+    screenshotPath: string,
+    pageUrl: string,
+    htmlSnippet?: string
+  ): Promise<PageClickableAnalysis> {
+    const imageBase64 = await this.imageToBase64(screenshotPath);
+    const mimeType = this.getMimeType(screenshotPath);
+
+    const systemPrompt = `당신은 웹 페이지의 클릭 가능한 UI 요소를 분석하는 전문가입니다.
+스크린샷을 보고 클릭 가능한 모든 영역을 식별하고, 각 영역에 대해 예상되는 HTML 속성과 이벤트를 예측합니다.
+
+## 분석 대상 영역
+
+### 1. GNB/헤더 영역 (headerElements)
+- 로고 (홈 링크)
+- 메뉴 항목 (카테고리, 브랜드 등)
+- 검색 버튼/아이콘
+- 장바구니 아이콘
+- 마이페이지/로그인 버튼
+- 상단 띠배너
+
+### 2. 메인 콘텐츠 영역 (contentElements)
+- 배너/슬라이드 (프로모션)
+- 상품 카드 (이미지, 이름, 가격)
+- 버튼 (장바구니 추가, 구매 등)
+- 탭/필터
+- 페이지네이션
+
+### 3. 푸터 영역 (footerElements)
+- 하단 링크
+- SNS 아이콘
+- 고객센터 링크
+
+## HTML 속성 예측 규칙
+
+### ap-click-* 속성 (일반 클릭 추적용)
+이 속성들은 클릭 이벤트 추적에 사용됩니다:
+
+- **ap-click-area**: 클릭 영역 분류
+  - GNB: 상단 네비게이션 메뉴
+  - HEADER: 헤더 영역 (로고, 검색, 장바구니 등)
+  - MAIN: 메인 컨텐츠 영역
+  - FOOTER: 푸터 영역
+  - BANNER: 배너/슬라이드
+  - PRODUCT: 상품 관련
+  - QUICK: 퀵메뉴
+
+- **ap-click-name**: 클릭 요소 세부 분류
+  - 메뉴명, 버튼명, 배너명 등
+  - 예: "로고 버튼", "검색 버튼", "장바구니", "메인배너_01"
+
+- **ap-click-data**: 클릭 관련 추가 데이터
+  - 링크 URL, 상품코드, 이벤트코드 등
+  - 예: "/kr/ko/brand/SULWHASOO", "P12345"
+
+### ap-promo-* 속성 (프로모션 추적용)
+이 속성들은 배너/프로모션 추적에 사용됩니다:
+
+- **ap-promo-id**: 프로모션 ID (예: "MAIN_BANNER_001")
+- **ap-promo-name**: 프로모션 이름 (배너에 표시된 텍스트)
+- **ap-promo-slot**: 노출 위치 (예: "main_banner_1", "sub_banner_2")
+
+## 이벤트 예측 규칙
+
+| 요소 타입 | 예상 이벤트 |
+|-----------|-------------|
+| 상품 카드 클릭 | select_item |
+| 장바구니 버튼 | add_to_cart |
+| 배너/프로모션 클릭 | select_promotion |
+| 일반 링크/버튼 | ap_click |
+| 검색 버튼 | ap_click (area=HEADER) |
+
+## selector 예측 규칙
+
+1. 속성 기반: \`[ap-click-area="GNB"]\`, \`[ap-promo-id]\`
+2. 클래스 기반: \`.btn-cart\`, \`.product-card\`
+3. 태그+역할 기반: \`nav a\`, \`button[type="submit"]\`
+4. 위치 기반: \`.header .logo\`, \`.main-banner .slide\``;
+
+    const userPrompt = `## 분석할 페이지
+URL: ${pageUrl}
+
+${htmlSnippet ? `## HTML 스니펫 (참고용)
+\`\`\`html
+${htmlSnippet.substring(0, 2000)}
+\`\`\`` : ''}
+
+## 요청
+스크린샷을 분석하여 클릭 가능한 모든 영역을 식별하고, 다음 JSON 형식으로 응답하세요:
+
+\`\`\`json
+{
+  "pageType": "페이지 타입",
+  "headerElements": [
+    {
+      "description": "로고 이미지 (홈 링크)",
+      "location": "좌측 상단",
+      "predictedSelector": ".header .logo a, [ap-click-area='HEADER'] .logo",
+      "predictedAttributes": {
+        "ap-click-area": "HEADER",
+        "ap-click-name": "로고 버튼",
+        "ap-click-data": "/"
+      },
+      "expectedEvent": "ap_click",
+      "expectedGA4Params": {
+        "event_category": "HEADER",
+        "event_action": "로고 버튼",
+        "event_label": "홈으로 이동"
+      },
+      "elementType": "link",
+      "confidence": "high"
+    }
+  ],
+  "contentElements": [
+    {
+      "description": "메인 배너 슬라이드",
+      "location": "화면 중앙 상단",
+      "predictedSelector": ".main-banner a, [ap-promo-id] a",
+      "predictedAttributes": {
+        "ap-promo-id": "MAIN_BANNER_001",
+        "ap-promo-name": "배너에 표시된 프로모션 텍스트",
+        "ap-promo-slot": "main_banner_1"
+      },
+      "expectedEvent": "select_promotion",
+      "expectedGA4Params": {
+        "promotion_id": "MAIN_BANNER_001",
+        "promotion_name": "배너 프로모션명",
+        "creative_slot": "main_banner_1"
+      },
+      "elementType": "banner",
+      "confidence": "high"
+    },
+    {
+      "description": "상품 카드 (첫 번째 상품)",
+      "location": "상품 목록 첫 번째",
+      "predictedSelector": ".product-card a, [ap-click-area='PRODUCT'] a",
+      "predictedAttributes": {
+        "ap-click-area": "PRODUCT",
+        "ap-click-name": "상품 클릭",
+        "ap-click-data": "상품코드"
+      },
+      "expectedEvent": "select_item",
+      "expectedGA4Params": {
+        "event_category": "PRODUCT",
+        "event_action": "상품 클릭"
+      },
+      "elementType": "product",
+      "confidence": "high"
+    }
+  ],
+  "footerElements": [],
+  "clickableElements": [],
+  "reasoning": "분석 근거 설명"
+}
+\`\`\`
+
+## 중요 지침
+1. **실제 화면에 보이는 요소만** 분석하세요
+2. 각 영역(header/content/footer)을 구분하여 정리하세요
+3. **selector는 범용적으로** 예측하세요 (여러 가능성 포함)
+4. **ap-click-area, ap-click-name, ap-click-data** 속성을 반드시 예측하세요
+5. 배너/프로모션은 **ap-promo-id, ap-promo-name, ap-promo-slot**도 예측하세요
+6. expectedGA4Params에는 클릭 시 전송될 GA4 파라미터를 예측하세요
+7. 화면에 텍스트가 있으면 정확히 읽어서 속성값에 반영하세요`;
+
+    try {
+      const result = await this.model.generateContent([
+        {
+          inlineData: {
+            mimeType,
+            data: imageBase64,
+          },
+        },
+        { text: systemPrompt + '\n\n' + userPrompt },
+      ]);
+
+      const response = result.response;
+      const text = response.text();
+
+      // JSON 파싱
+      const jsonMatch = text.match(/```json\n?([\s\S]*?)\n?```/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[1]);
+      }
+
+      const jsonStart = text.indexOf('{');
+      const jsonEnd = text.lastIndexOf('}');
+      if (jsonStart !== -1 && jsonEnd !== -1) {
+        return JSON.parse(text.substring(jsonStart, jsonEnd + 1));
+      }
+
+      throw new Error('응답에서 JSON을 찾을 수 없습니다.');
+    } catch (error: any) {
+      console.error('클릭 영역 분석 오류:', error.message);
+      throw error;
+    }
+  }
+}
+
+/**
+ * 클릭 가능 요소 예측 결과
+ */
+export interface ClickableElementPrediction {
+  /** 요소 설명 */
+  description: string;
+  /** 화면상 위치 */
+  location: string;
+  /** 예상 selector */
+  predictedSelector: string;
+  /** 예상 HTML 속성 */
+  predictedAttributes: {
+    'ap-click-area'?: string;
+    'ap-click-name'?: string;
+    'ap-click-data'?: string;
+    'ap-promo-id'?: string;
+    'ap-promo-name'?: string;
+    'ap-promo-slot'?: string;
+    [key: string]: string | undefined;
+  };
+  /** 예상 이벤트 */
+  expectedEvent: string;
+  /** 클릭 시 발생할 GA4 파라미터 */
+  expectedGA4Params: {
+    event_category?: string;
+    event_action?: string;
+    event_label?: string;
+    promotion_id?: string;
+    promotion_name?: string;
+    creative_slot?: string;
+    [key: string]: string | undefined;
+  };
+  /** 요소 타입 */
+  elementType: 'button' | 'link' | 'banner' | 'product' | 'navigation' | 'icon' | 'other';
+  /** 확신도 */
+  confidence: 'high' | 'medium' | 'low';
+}
+
+/**
+ * 페이지 클릭 영역 분석 결과
+ */
+export interface PageClickableAnalysis {
+  /** 페이지 타입 */
+  pageType: string;
+  /** 식별된 클릭 영역 */
+  clickableElements: ClickableElementPrediction[];
+  /** GNB/헤더 영역 */
+  headerElements: ClickableElementPrediction[];
+  /** 메인 컨텐츠 영역 */
+  contentElements: ClickableElementPrediction[];
+  /** 푸터 영역 */
+  footerElements: ClickableElementPrediction[];
+  /** 분석 근거 */
+  reasoning: string;
 }
 
 /**
