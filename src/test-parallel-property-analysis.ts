@@ -12,6 +12,7 @@ import { GA4Client } from './ga4/ga4Client';
 import { GeminiVisionAnalyzer } from './analyzers/visionAnalyzer';
 import { GTMEventParameterExtractor } from './config/gtmEventParameterExtractor';
 import { getGlobalGTMConfig, PreloadedGTMConfig } from './config/gtmConfigLoader';
+import { ECOMMERCE_ITEM_PARAMS, EVENT_ITEMS_SOURCES } from './config/ecommerceItemsMapping';
 import { chromium, Browser, BrowserContext } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -237,7 +238,7 @@ function getDefaultPages(domain: string): ContentGroupPage[] {
   }));
 }
 
-// GTM 변수명 → AP_DATA 변수 매핑
+// GTM 변수명 → AP_DATA 변수 매핑 (공통 변수)
 const GTM_VARIABLE_TO_AP_DATA: Record<string, string> = {
   'site_name': 'AP_DATA_SITENAME',
   'site_country': 'AP_DATA_COUNTRY',
@@ -248,16 +249,71 @@ const GTM_VARIABLE_TO_AP_DATA: Record<string, string> = {
   'login_is_login': 'AP_DATA_ISLOGIN',
   'login_member_grade': 'AP_DATA_MEMBERGRADE',
   'user_id': 'AP_DATA_USERID',
-  'item_id': 'AP_PRD_CODE',
-  'item_name': 'AP_PRD_NAME',
-  'item_brand': 'AP_PRD_BRAND',
-  'item_category': 'AP_PRD_CATEGORY',
-  'price': 'AP_PRD_PRICE',
   'search_term': 'AP_SEARCH_TERM',
   'search_result_count': 'AP_SEARCH_NUM',
-  'currency': 'AP_DATA_CURRENCY',
-  'value': 'AP_PRD_PRICE',
+  'currency': 'AP_ECOMM_CURRENCY',
 };
+
+/**
+ * 이벤트별 파라미터 → AP_* 변수 매핑 생성
+ * ecommerceItemsMapping.ts의 정의를 활용
+ */
+function getEventParamToApDataMapping(eventName: string): Record<string, string[]> {
+  const mapping: Record<string, string[]> = {};
+
+  // 공통 변수 매핑 추가
+  for (const [paramKey, apVar] of Object.entries(GTM_VARIABLE_TO_AP_DATA)) {
+    mapping[paramKey] = [apVar];
+  }
+
+  // 이커머스 items 파라미터 매핑 (이벤트별)
+  for (const param of ECOMMERCE_ITEM_PARAMS) {
+    const eventSource = param.sources.find(s => s.event === eventName);
+    if (eventSource && eventSource.sourceType === 'global_variable') {
+      // AP_PRD_CODE 형태의 전역 변수
+      const varName = eventSource.sourcePath;
+      if (!mapping[param.ga4Param]) {
+        mapping[param.ga4Param] = [];
+      }
+      mapping[param.ga4Param].push(varName);
+    }
+  }
+
+  // view_item 이벤트 전용 매핑
+  if (eventName === 'view_item') {
+    mapping['product_id'] = ['AP_PRD_CODE'];
+    mapping['product_name'] = ['AP_PRD_NAME'];
+    mapping['product_brandname'] = ['AP_PRD_BRAND'];
+    mapping['product_category'] = ['AP_PRD_CATEGORY'];
+    mapping['product_price'] = ['AP_PRD_PRICE'];
+    mapping['product_prdprice'] = ['AP_PRD_PRDPRICE'];
+    mapping['product_brandcode'] = ['AP_PRD_BRANDCODE'];
+    mapping['product_pagecode'] = ['AP_PRD_PAGECODE'];
+    mapping['product_is_stock'] = ['AP_PRD_ISSTOCK'];
+    mapping['product_is_pacific'] = ['AP_PRD_ISPACIFIC'];
+    mapping['product_sn'] = ['AP_PRD_SN'];
+  }
+
+  // view_item_list, view_search_results 이벤트 매핑
+  if (eventName === 'view_item_list' || eventName === 'view_search_results') {
+    mapping['search_term'] = ['AP_SEARCH_TERM'];
+    mapping['search_type'] = ['AP_SEARCH_TYPE'];
+    mapping['search_resultcount'] = ['AP_SEARCH_NUM'];
+    mapping['search_result'] = ['AP_SEARCH_RESULT'];
+    mapping['search_mod_term'] = ['AP_SEARCH_MODTERM'];
+    mapping['search_mod_result'] = ['AP_SEARCH_MODRESULT'];
+  }
+
+  // view_promotion_detail, select_promotion 매핑
+  if (eventName.includes('promotion')) {
+    mapping['promotion_id'] = ['AP_PROMO_ID'];
+    mapping['promotion_name'] = ['AP_PROMO_NAME'];
+    mapping['creative_name'] = ['AP_PROMO_CREATIVENAME'];
+    mapping['creative_slot'] = ['AP_PROMO_CREATIVESLOT'];
+  }
+
+  return mapping;
+}
 
 /**
  * 단일 페이지 분석 (병렬 처리용)
@@ -395,23 +451,49 @@ async function analyzePageParallel(
       let matchedCount = 0;
 
       if (gtmEvent && gtmParamCount > 0) {
+        // 이벤트별 파라미터 → AP_* 매핑 가져오기
+        const eventParamMapping = getEventParamToApDataMapping(eventName);
+
         for (const param of gtmEvent.eventParameters) {
           const paramKey = param.key.toLowerCase();
           const gtmVariable = param.valueSource || '';
-
-          // AP_DATA 변수명 찾기 (여러 패턴 시도)
-          const apDataKey = GTM_VARIABLE_TO_AP_DATA[paramKey] ||
-                           `AP_DATA_${paramKey.toUpperCase()}`;
 
           // Vision AI 예측값
           const predictedValue = visionVars?.[paramKey] ||
                                 visionVars?.[param.key] || null;
 
-          // 개발된 변수값 (AP_DATA 또는 dataLayer에서)
-          let developedValue = actualVariables[apDataKey] ||
-                              actualVariables[`AP_PRD_${paramKey.toUpperCase()}`] ||
-                              actualVariables[`AP_${paramKey.toUpperCase()}`] ||
-                              actualVariables[param.key] || null;
+          // 이벤트별 매핑에서 AP_* 변수명 찾기
+          let developedValue: string | null = null;
+          let matchedApVar: string | null = null;
+
+          const apVarCandidates = eventParamMapping[paramKey] ||
+                                  eventParamMapping[param.key] || [];
+
+          for (const apVar of apVarCandidates) {
+            if (actualVariables[apVar]) {
+              developedValue = actualVariables[apVar];
+              matchedApVar = apVar;
+              break;
+            }
+          }
+
+          // 매핑에 없으면 일반적인 패턴 시도
+          if (!developedValue) {
+            const fallbackKeys = [
+              `AP_DATA_${paramKey.toUpperCase()}`,
+              `AP_PRD_${paramKey.toUpperCase()}`,
+              `AP_SEARCH_${paramKey.toUpperCase()}`,
+              `AP_PROMO_${paramKey.toUpperCase()}`,
+              `AP_${paramKey.toUpperCase()}`,
+            ];
+            for (const key of fallbackKeys) {
+              if (actualVariables[key]) {
+                developedValue = actualVariables[key];
+                matchedApVar = key;
+                break;
+              }
+            }
+          }
 
           // dataLayer에서 추가 확인
           if (!developedValue) {
@@ -423,15 +505,11 @@ async function analyzePageParallel(
               'item_category': 'DL_ITEM_CATEGORY',
               'currency': 'DL_CURRENCY',
               'value': 'DL_VALUE',
-              'product_id': 'DL_ITEM_ID',
-              'product_name': 'DL_ITEM_NAME',
-              'product_brandname': 'DL_ITEM_BRAND',
-              'product_price': 'DL_PRICE',
-              'product_category': 'DL_ITEM_CATEGORY',
             };
             const dlKey = dlMappings[paramKey];
-            if (dlKey) {
-              developedValue = actualVariables[dlKey] || null;
+            if (dlKey && actualVariables[dlKey]) {
+              developedValue = actualVariables[dlKey];
+              matchedApVar = dlKey;
             }
           }
 
@@ -456,7 +534,7 @@ async function analyzePageParallel(
 
           parameters.push({
             paramKey: param.key,
-            gtmVariable,
+            gtmVariable: matchedApVar || gtmVariable,  // AP_* 변수명 표시
             predictedValue: predictedValue ? String(predictedValue) : null,
             developedValue: developedValue ? String(developedValue) : null,
             ga4Value: ga4Value ? String(ga4Value) : null,
