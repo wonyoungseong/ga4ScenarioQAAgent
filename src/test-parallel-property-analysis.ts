@@ -314,22 +314,37 @@ async function analyzePageParallel(
 
     await page.waitForTimeout(1500);
 
-    // 전역 변수 수집
+    // 전역 변수 수집 (모든 AP_ 변수)
     actualVariables = await page.evaluate(() => {
       const vars: Record<string, string> = {};
-      const varNames = [
-        'AP_DATA_SITENAME', 'AP_DATA_COUNTRY', 'AP_DATA_LANG', 'AP_DATA_ENV',
-        'AP_DATA_CHANNEL', 'AP_DATA_PAGETYPE', 'AP_DATA_ISLOGIN',
-        'AP_PRD_CODE', 'AP_PRD_NAME', 'AP_PRD_BRAND', 'AP_PRD_CATEGORY',
-        'AP_PRD_PRICE', 'AP_PRD_PRDPRICE',
-      ];
 
-      for (const name of varNames) {
-        const value = (window as any)[name];
-        if (value !== undefined && value !== null && value !== '') {
-          vars[name] = String(value);
+      // 모든 AP_ 접두사 변수 수집
+      for (const key of Object.keys(window)) {
+        if (key.startsWith('AP_') || key.startsWith('ap_')) {
+          const value = (window as any)[key];
+          if (value !== undefined && value !== null && value !== '') {
+            vars[key] = String(value);
+          }
         }
       }
+
+      // dataLayer에서 ecommerce 데이터 추출
+      const dataLayer = (window as any).dataLayer || [];
+      for (const item of dataLayer) {
+        if (item && item.ecommerce) {
+          if (item.ecommerce.items && item.ecommerce.items.length > 0) {
+            const firstItem = item.ecommerce.items[0];
+            if (firstItem.item_id) vars['DL_ITEM_ID'] = String(firstItem.item_id);
+            if (firstItem.item_name) vars['DL_ITEM_NAME'] = String(firstItem.item_name);
+            if (firstItem.item_brand) vars['DL_ITEM_BRAND'] = String(firstItem.item_brand);
+            if (firstItem.price) vars['DL_PRICE'] = String(firstItem.price);
+            if (firstItem.item_category) vars['DL_ITEM_CATEGORY'] = String(firstItem.item_category);
+          }
+          if (item.ecommerce.currency) vars['DL_CURRENCY'] = String(item.ecommerce.currency);
+          if (item.ecommerce.value) vars['DL_VALUE'] = String(item.ecommerce.value);
+        }
+      }
+
       return vars;
     });
 
@@ -384,7 +399,7 @@ async function analyzePageParallel(
           const paramKey = param.key.toLowerCase();
           const gtmVariable = param.valueSource || '';
 
-          // AP_DATA 변수명 찾기
+          // AP_DATA 변수명 찾기 (여러 패턴 시도)
           const apDataKey = GTM_VARIABLE_TO_AP_DATA[paramKey] ||
                            `AP_DATA_${paramKey.toUpperCase()}`;
 
@@ -392,10 +407,33 @@ async function analyzePageParallel(
           const predictedValue = visionVars?.[paramKey] ||
                                 visionVars?.[param.key] || null;
 
-          // 개발된 변수값 (AP_DATA)
-          const developedValue = actualVariables[apDataKey] ||
-                                actualVariables[`AP_PRD_${paramKey.toUpperCase()}`] ||
-                                actualVariables[param.key] || null;
+          // 개발된 변수값 (AP_DATA 또는 dataLayer에서)
+          let developedValue = actualVariables[apDataKey] ||
+                              actualVariables[`AP_PRD_${paramKey.toUpperCase()}`] ||
+                              actualVariables[`AP_${paramKey.toUpperCase()}`] ||
+                              actualVariables[param.key] || null;
+
+          // dataLayer에서 추가 확인
+          if (!developedValue) {
+            const dlMappings: Record<string, string> = {
+              'item_id': 'DL_ITEM_ID',
+              'item_name': 'DL_ITEM_NAME',
+              'item_brand': 'DL_ITEM_BRAND',
+              'price': 'DL_PRICE',
+              'item_category': 'DL_ITEM_CATEGORY',
+              'currency': 'DL_CURRENCY',
+              'value': 'DL_VALUE',
+              'product_id': 'DL_ITEM_ID',
+              'product_name': 'DL_ITEM_NAME',
+              'product_brandname': 'DL_ITEM_BRAND',
+              'product_price': 'DL_PRICE',
+              'product_category': 'DL_ITEM_CATEGORY',
+            };
+            const dlKey = dlMappings[paramKey];
+            if (dlKey) {
+              developedValue = actualVariables[dlKey] || null;
+            }
+          }
 
           // GA4 수집값
           const ga4Value = ga4CollectedValues[paramKey] ||
@@ -726,6 +764,19 @@ async function main() {
       console.log(`     content_group: ${cg.contentGroup}`);
       console.log(`     page_views: ${cg.pageViewCount}`);
 
+      // 수집된 변수 요약
+      const collectedVarCount = Object.keys(cg.actualVariables).length;
+      if (collectedVarCount > 0) {
+        console.log(`     수집된 변수: ${collectedVarCount}개`);
+        const varList = Object.entries(cg.actualVariables)
+          .slice(0, 8)
+          .map(([k, v]) => `${k}=${String(v).substring(0, 15)}`)
+          .join(', ');
+        console.log(`     [${varList}${collectedVarCount > 8 ? '...' : ''}]`);
+      } else {
+        console.log(`     ⚠️ 수집된 AP_DATA 변수 없음`);
+      }
+
       // 변수 비교 테이블
       if (cg.variableComparisons.length > 0) {
         console.log(`\n     [공통 변수 비교]`);
@@ -741,29 +792,38 @@ async function main() {
         }
       }
 
-      // 이벤트 파라미터 비교 테이블
+      // 이벤트 목록 (파라미터가 있는 이벤트만 요약)
       if (cg.events.length > 0) {
-        console.log(`\n     [이벤트 파라미터 비교]`);
+        const eventsWithData = cg.events.filter(e => e.matchedCount > 0);
+        const eventsWithoutData = cg.events.filter(e => e.matchedCount === 0 && e.gtmDefinedParams > 0);
 
-        for (const event of cg.events) {
-          if (event.parameters.length === 0) continue;
+        console.log(`\n     [예상 이벤트]`);
+        console.log(`     발생 가능 이벤트: ${cg.events.map(e => e.eventName).join(', ')}`);
 
-          console.log(`\n     📌 ${event.eventName} (GTM 파라미터: ${event.gtmDefinedParams}개, 매칭: ${event.matchedCount}개, 정확도: ${event.accuracy.toFixed(0)}%)`);
-          console.log(`     ${'─'.repeat(90)}`);
-          console.log(`     ${'파라미터'.padEnd(18)} | ${'예측값'.padEnd(16)} | ${'개발값'.padEnd(16)} | ${'GA4값'.padEnd(16)} | 상태`);
-          console.log(`     ${'─'.repeat(90)}`);
+        if (eventsWithData.length > 0) {
+          console.log(`\n     [파라미터 데이터 확인된 이벤트]`);
+          for (const event of eventsWithData) {
+            console.log(`     ✅ ${event.eventName}: ${event.matchedCount}/${event.gtmDefinedParams} 파라미터 확인`);
 
-          for (const param of event.parameters.slice(0, 15)) {  // 최대 15개만 표시
-            const predicted = (param.predictedValue || '-').substring(0, 16).padEnd(16);
-            const developed = (param.developedValue || '-').substring(0, 16).padEnd(16);
-            const ga4 = (param.ga4Value || '-').substring(0, 16).padEnd(16);
-            const statusIcon = param.matched ? '✅' : (param.source === 'none' ? '⚪' : '⚠️');
-            console.log(`     ${param.paramKey.padEnd(18)} | ${predicted} | ${developed} | ${ga4} | ${statusIcon}`);
+            // 실제 값이 있는 파라미터만 표시
+            const paramsWithData = event.parameters.filter(p => p.developedValue || p.predictedValue || p.ga4Value);
+            if (paramsWithData.length > 0) {
+              console.log(`     ${'─'.repeat(70)}`);
+              console.log(`     ${'파라미터'.padEnd(18)} | ${'예측값'.padEnd(16)} | ${'개발값'.padEnd(16)} | 매칭`);
+              console.log(`     ${'─'.repeat(70)}`);
+              for (const param of paramsWithData.slice(0, 10)) {
+                const predicted = (param.predictedValue || '-').substring(0, 16).padEnd(16);
+                const developed = (param.developedValue || '-').substring(0, 16).padEnd(16);
+                const matchIcon = param.matched ? '✅' : '❌';
+                console.log(`     ${param.paramKey.padEnd(18)} | ${predicted} | ${developed} | ${matchIcon}`);
+              }
+            }
           }
+        }
 
-          if (event.parameters.length > 15) {
-            console.log(`     ... 외 ${event.parameters.length - 15}개 파라미터`);
-          }
+        if (eventsWithoutData.length > 0) {
+          console.log(`\n     ⚠️ 파라미터 확인 불가: ${eventsWithoutData.map(e => e.eventName).join(', ')}`);
+          console.log(`        (이벤트 파라미터는 dataLayer push 시점에만 확인 가능)`);
         }
       }
 
@@ -872,30 +932,37 @@ async function main() {
         mdContent += `\n`;
       }
 
-      // 이벤트 파라미터 비교
+      // 이벤트 목록
       if (cg.events.length > 0) {
-        mdContent += `**이벤트 파라미터 비교**\n\n`;
+        mdContent += `**예상 발생 이벤트**\n\n`;
+        mdContent += `${cg.events.map(e => `\`${e.eventName}\``).join(', ')}\n\n`;
 
-        for (const event of cg.events) {
-          if (event.parameters.length === 0) continue;
+        const eventsWithData = cg.events.filter(e => e.matchedCount > 0);
+        if (eventsWithData.length > 0) {
+          mdContent += `**파라미터 데이터 확인된 이벤트**\n\n`;
 
-          mdContent += `##### ${event.eventName}\n\n`;
-          mdContent += `- GTM 정의 파라미터: ${event.gtmDefinedParams}개\n`;
-          mdContent += `- 매칭된 파라미터: ${event.matchedCount}개\n`;
-          mdContent += `- 정확도: ${event.accuracy.toFixed(0)}%\n\n`;
+          for (const event of eventsWithData) {
+            mdContent += `##### ${event.eventName}\n\n`;
+            mdContent += `- 확인된 파라미터: ${event.matchedCount}/${event.gtmDefinedParams}개\n\n`;
 
-          mdContent += `| 파라미터 | 예측값 | 개발값 | GA4값 | 상태 |\n`;
-          mdContent += `|----------|--------|--------|-------|------|\n`;
+            const paramsWithData = event.parameters.filter(p => p.developedValue || p.predictedValue);
+            if (paramsWithData.length > 0) {
+              mdContent += `| 파라미터 | 예측값 | 개발값 | 매칭 |\n`;
+              mdContent += `|----------|--------|--------|------|\n`;
 
-          for (const param of event.parameters.slice(0, 20)) {
-            const statusIcon = param.matched ? '✅' : (param.source === 'none' ? '⚪' : '⚠️');
-            mdContent += `| ${param.paramKey} | ${(param.predictedValue || '-').substring(0, 20)} | ${(param.developedValue || '-').substring(0, 20)} | ${(param.ga4Value || '-').substring(0, 20)} | ${statusIcon} |\n`;
+              for (const param of paramsWithData.slice(0, 15)) {
+                const matchIcon = param.matched ? '✅' : '❌';
+                mdContent += `| ${param.paramKey} | ${(param.predictedValue || '-').substring(0, 20)} | ${(param.developedValue || '-').substring(0, 20)} | ${matchIcon} |\n`;
+              }
+              mdContent += `\n`;
+            }
           }
+        }
 
-          if (event.parameters.length > 20) {
-            mdContent += `\n*... 외 ${event.parameters.length - 20}개 파라미터*\n`;
-          }
-          mdContent += `\n`;
+        const eventsWithoutData = cg.events.filter(e => e.matchedCount === 0 && e.gtmDefinedParams > 0);
+        if (eventsWithoutData.length > 0) {
+          mdContent += `**파라미터 확인 불가 이벤트**: ${eventsWithoutData.map(e => `\`${e.eventName}\``).join(', ')}\n\n`;
+          mdContent += `> 이벤트 파라미터는 dataLayer push 시점에만 확인 가능합니다.\n\n`;
         }
       }
 
