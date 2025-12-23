@@ -7,23 +7,37 @@
   },
 
   "step1_pageType": {
-    "instruction": "화면을 보고 먼저 페이지 타입을 판단하세요",
+    "instruction": "URL 패턴을 먼저 확인하고, 화면을 보고 페이지 타입을 판단하세요",
     "priority_rules": [
-      "1. 이벤트 팝업이 있어도 배경에 메인 배너/추천 상품이 보이면 MAIN",
-      "2. URL에 /event/숫자 패턴이 있고 이벤트 전용 콘텐츠만 있으면 EVENT_DETAIL",
-      "3. 팝업은 무시하고 메인 콘텐츠 영역을 기준으로 판단"
+      "1. URL 패턴 우선 확인 (아래 url_patterns 참조)",
+      "2. URL로 판단 어려우면 화면 콘텐츠로 판단",
+      "3. 이벤트 팝업이 있어도 배경에 메인 배너/추천 상품이 보이면 MAIN",
+      "4. 팝업은 무시하고 메인 콘텐츠 영역을 기준으로 판단"
     ],
+    "url_patterns": {
+      "PRODUCT_DETAIL": ["/product/detail", "/ProductView", "/shop/item/", "/goods/", "product_no=", "onlineProdSn=", "onlineProdCode="],
+      "PRODUCT_LIST": ["/category/", "/brand/", "/shop/list", "/goods/catalog"],
+      "SEARCH_RESULT": ["/search", "search.html", "keyword=", "query=", "q="],
+      "CART": ["/cart", "/basket", "order/basket"],
+      "ORDER": ["/order/", "/checkout/", "order.html"],
+      "ORDER_COMPLETE": ["/order/complete", "/order/success", "order_complete"],
+      "EVENT_DETAIL": ["/event/", "/article/event/", "/promotion/"],
+      "BRAND_MAIN": ["/brand/", "/brandshop/"],
+      "MY": ["/mypage", "/my/", "/member/", "/login", "/consult/"],
+      "OTHERS": ["/faq", "/notice", "/board/", "/article/faq/", "/help/", "/cs/", "/about/"]
+    },
     "rules": {
-      "MAIN": "대형 히어로 배너 + 추천 상품 섹션 (이벤트 팝업이 있어도 배경이 메인이면 MAIN)",
+      "MAIN": "대형 히어로 배너 + 추천 상품 섹션 (홈페이지, 루트 URL)",
       "PRODUCT_DETAIL": "단일 상품 큰 이미지 + 가격 + 장바구니/구매 버튼",
       "PRODUCT_LIST": "상품 카드 그리드 (여러 상품) + 필터/정렬 옵션 + 카테고리명",
-      "SEARCH_RESULT": "'검색어' 검색 결과 표시 + 결과 개수 + 상품 목록",
+      "SEARCH_RESULT": "'검색어' 검색 결과 표시 + 결과 개수 + 상품 목록 (URL에 search, keyword, q= 포함)",
       "CART": "장바구니 상품 목록 + 수량 조절 + 총 금액 + 주문하기 버튼",
       "ORDER": "배송지 입력 폼 + 결제 수단 선택 + 결제 버튼",
       "ORDER_COMPLETE": "주문 완료 메시지 + 주문번호",
-      "EVENT_DETAIL": "이벤트 전용 페이지 (URL에 /event/ 포함 + 이벤트 콘텐츠만 존재)",
+      "EVENT_DETAIL": "이벤트 전용 페이지 (URL에 /event/, /article/event/ 포함)",
       "BRAND_MAIN": "브랜드 로고 크게 + 브랜드 전용 상품 목록",
-      "MY": "회원 정보 + 주문 내역/포인트/쿠폰 메뉴"
+      "MY": "회원 정보 + 주문 내역/포인트/쿠폰 메뉴 + 로그인 페이지",
+      "OTHERS": "FAQ, 공지사항, 고객센터, 회사소개 등 기타 페이지"
     }
   },
 

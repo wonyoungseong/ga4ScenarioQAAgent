@@ -1372,10 +1372,53 @@ URL: ${pageUrl}
       return 'PRD';
     })();
 
+    // URL 패턴 기반 페이지 타입 힌트
+    const urlPageTypeHint = (() => {
+      const urlLower = pageUrl.toLowerCase();
+
+      // OTHERS 우선 체크 (FAQ, 공지사항 등)
+      if (/\/(faq|notice|board|help|cs|about|article\/faq|consult)/.test(urlLower)) return 'OTHERS';
+
+      // 검색 결과
+      if (/\/search|search\.html|\?.*(?:keyword|query|q)=/.test(urlLower)) return 'SEARCH_RESULT';
+
+      // 장바구니
+      if (/\/(cart|basket)|order\/basket/.test(urlLower)) return 'CART';
+
+      // 주문 완료
+      if (/\/order\/(complete|success)|order_complete/.test(urlLower)) return 'ORDER_COMPLETE';
+
+      // 주문/체크아웃
+      if (/\/(order|checkout)\/|order\.html/.test(urlLower)) return 'ORDER';
+
+      // 상품 상세 (Cafe24 패턴 포함: /product/상품명/숫자/)
+      if (/\/product\/detail|\/ProductView|\/shop\/item\/|\/goods\/\d|product_no=|onlineProdSn=|onlineProdCode=/.test(urlLower)) return 'PRODUCT_DETAIL';
+      if (/\/product\/[^\/]+\/\d+\//.test(urlLower)) return 'PRODUCT_DETAIL'; // Cafe24: /product/상품명/숫자/
+
+      // 이벤트 상세
+      if (/\/event\/|\/article\/event\/|\/promotion\//.test(urlLower)) return 'EVENT_DETAIL';
+
+      // 브랜드 메인
+      if (/\/brand\/|\/brandshop\//.test(urlLower)) return 'BRAND_MAIN';
+
+      // 마이페이지
+      if (/\/mypage|\/my\/|\/member\/|\/login/.test(urlLower)) return 'MY';
+
+      // 상품 목록 (Cafe24 패턴 포함: /category/숫자/)
+      if (/\/category\/|\/shop\/list|\/goods\/catalog/.test(urlLower)) return 'PRODUCT_LIST';
+      if (/\/product\/.*\/category\/\d+\//.test(urlLower)) return 'PRODUCT_LIST'; // Cafe24 카테고리
+
+      return null; // 판단 불가
+    })();
+
     const systemPrompt = `당신은 웹 페이지 분석 전문가입니다.
 스크린샷을 보고 즉시 페이지 타입과 GA4 변수 값을 예측합니다.
 
-## 핵심 규칙 (반드시 준수)
+${urlPageTypeHint ? `## ⚠️ URL 패턴 기반 페이지 타입 힌트
+URL 분석 결과: **${urlPageTypeHint}** 페이지로 추정됩니다.
+화면 내용과 일치하면 이 타입을 사용하세요. 명백히 다른 경우에만 변경하세요.
+
+` : ''}## 핵심 규칙 (반드시 준수)
 
 ### 1. 공통 변수 결정 규칙 (7개)
 
