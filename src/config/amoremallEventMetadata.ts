@@ -470,22 +470,36 @@ export function createEventMetadataList(): EventMetadata[] {
   });
 
   // login
+  // 주의: login_complete dataLayer 이벤트로 발생하며, 페이지 제한 없음 (로그인 후 리다이렉트되는 모든 페이지)
   events.push({
     eventName: 'login',
     displayName: '로그인',
-    description: '로그인 완료 시 발생',
+    description: '로그인 완료 시 발생. login_complete dataLayer 이벤트에 의해 트리거됨.',
     fireType: 'userAction',
-    pageTypes: ['LOGIN', 'ALL'],
+    pageTypes: ['ALL'], // 로그인 후 리다이렉트되는 모든 페이지에서 발생 가능
     trigger: {
       selectors: [],
-      actionType: 'submit',
-      description: '로그인 폼 제출 후 리다이렉트',
+      actionType: 'custom',
+      dataLayerEvent: 'login_complete',
+      description: 'dataLayer.push({event: "login_complete"}) 발생 시',
     },
     requiredVariables: REQUIRED_VARIABLES['login'],
     dataLayerValidation: {
       eventName: 'login',
     },
     visionHints: VISION_HINTS['login'],
+    gtmInfo: {
+      tagId: '336',
+      tagName: 'GA4 - Basic Event - Login',
+      triggerId: '228',
+      triggerName: 'CE - Login Complete Trigger',
+      triggerType: 'CUSTOM_EVENT',
+      customEventFilter: '_event = "login_complete"',
+    },
+    dependencyChain: {
+      description: 'login_complete dataLayer 이벤트가 발생해야 함. 로그인 프로세스 완료 후 리다이렉트 시 발생.',
+      prerequisiteTags: [],
+    },
   });
 
   // sign_up
@@ -586,12 +600,13 @@ export function createEventMetadataList(): EventMetadata[] {
   });
 
   // custom_event (범용 커스텀 이벤트)
+  // 주의: 페이지 제한 없이 모든 페이지에서 발생 가능한 범용 이벤트
   events.push({
     eventName: 'custom_event',
     displayName: '커스텀 이벤트',
-    description: '범용 커스텀 이벤트. event_category, event_action, event_label로 분류',
+    description: '범용 커스텀 이벤트. event_category, event_action, event_label로 분류. 페이지 제한 없음.',
     fireType: 'userAction',
-    pageTypes: ['ALL'],
+    pageTypes: ['ALL'], // 모든 페이지에서 발생 가능
     trigger: {
       selectors: [],
       actionType: 'custom',
@@ -611,15 +626,21 @@ export function createEventMetadataList(): EventMetadata[] {
       triggerType: 'CUSTOM_EVENT',
       customEventFilter: '_event = "customEvent"',
     },
+    dependencyChain: {
+      description: '페이지 제한 없는 범용 이벤트. customEvent dataLayer 이벤트가 발생하면 모든 페이지에서 트리거됨.',
+      prerequisiteTags: [],
+    },
   });
 
   // qualified_visit (캠페인 한정 이벤트)
+  // 주의: 다양한 조건으로 발생 (YouTube 50%, Scroll 90%, Timer 10s, 상품상세 이동, 이벤트 상품 보기)
+  // 일부 소스 태그는 특정 캠페인 페이지에서만 발생
   events.push({
     eventName: 'qualified_visit',
     displayName: '조건부 방문 (캠페인)',
-    description: '특정 캠페인 기간에만 발생하는 조건부 방문 이벤트. 쿠키 조건으로 중복 발생 방지',
+    description: '특정 캠페인 기간에만 발생하는 조건부 방문 이벤트. 다양한 사용자 행동(YouTube 50%, Scroll 90%, Timer 10s 등)에 의해 트리거됨. 쿠키 조건으로 중복 발생 방지.',
     fireType: 'autoFire',
-    pageTypes: ['MAIN', 'ALL'],
+    pageTypes: ['ALL'], // 다양한 조건으로 여러 페이지에서 발생 가능
     trigger: {
       selectors: [],
       actionType: 'custom',
@@ -627,6 +648,7 @@ export function createEventMetadataList(): EventMetadata[] {
       description: 'dataLayer.push({event: "qualified_visit"}) + 쿠키 조건 충족 시',
       additionalConditions: [
         'Cookie "BDP Qualified Visit Event Fired" = "N"',
+        'YouTube 50% 진행 OR Scroll 90% OR Timer 10초 OR 상품상세 이동 OR 이벤트 상품 보기',
       ],
     },
     requiredVariables: REQUIRED_VARIABLES['qualified_visit'],
@@ -643,11 +665,46 @@ export function createEventMetadataList(): EventMetadata[] {
       customEventFilter: '_event = "qualified_visit"',
       additionalFilter: 'Cookie - BDP Qualified Visit Event Fired = "N"',
     },
+    dependencyChain: {
+      description: 'qualified_visit dataLayer 이벤트가 5개의 다른 HTML 태그에서 발생. 각 태그는 다른 조건을 가짐.',
+      prerequisiteTags: [
+        {
+          tagId: '590',
+          tagName: 'HTML - Push Qualified Visit Event - Video Progress 50%',
+          triggerId: '608',
+          triggerCondition: 'YouTube Video 50% Progress',
+        },
+        {
+          tagId: '609',
+          tagName: 'HTML - Push Qualified Visit Event - Scroll 90%',
+          triggerId: '605',
+          triggerCondition: 'CE - ap_scroll_90 (모든 페이지)',
+        },
+        {
+          tagId: '610',
+          tagName: 'HTML - Push Qualified Visit Event - Page Duration 10 Second',
+          triggerId: '607',
+          triggerCondition: 'CE - ap_timer_10s (모든 페이지)',
+        },
+        {
+          tagId: '628',
+          tagName: 'HTML - Push Qualified Visit Event - Go To Product Detail',
+          triggerId: '627',
+          triggerCondition: 'LC - .prdbtn 클릭 + URL MATCH preview?planDisplaySn=(13651|13652|13653|13654)',
+        },
+        {
+          tagId: '629',
+          tagName: 'HTML - Push Qualified Visit Event - View Event Product',
+          triggerId: '626',
+          triggerCondition: 'AC - .module-floating__btn-more 클릭 + URL MATCH preview?planDisplaySn=(13651|13652|13653|13654)',
+        },
+      ],
+    },
     campaignInfo: {
       isCampaignSpecific: true,
       description: '특정 캠페인 기간에만 활성화되는 이벤트',
       cookieCondition: 'BDP Qualified Visit Event Fired = "N" (중복 방지)',
-      note: '캠페인 종료 시 수집량이 0이 될 수 있음',
+      note: '캠페인 종료 시 수집량이 0이 될 수 있음. 일부 트리거는 특정 planDisplaySn 페이지에서만 발생.',
     },
   });
 

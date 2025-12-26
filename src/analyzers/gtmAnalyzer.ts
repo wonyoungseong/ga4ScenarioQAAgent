@@ -10,6 +10,7 @@ import {
   EventEvaluationResult,
   TriggerEvaluationResult
 } from './filterEvaluator';
+import { GTMConstraintValidator } from './gtmConstraintValidator';
 
 export interface GTMTrigger {
   triggerId: string;
@@ -111,11 +112,15 @@ export interface GTMAnalysisResult {
 export class GTMAnalyzer {
   private gtmData: any;
   private filterEvaluator: FilterEvaluator;
+  private constraintValidator: GTMConstraintValidator;
+  private gtmFilePath: string;
 
   constructor(gtmJsonPath: string) {
+    this.gtmFilePath = gtmJsonPath;
     const content = fs.readFileSync(gtmJsonPath, 'utf-8');
     this.gtmData = JSON.parse(content);
     this.filterEvaluator = new FilterEvaluator();
+    this.constraintValidator = new GTMConstraintValidator(gtmJsonPath);
   }
 
   /**
@@ -664,6 +669,245 @@ export class GTMAnalyzer {
 
     return lines.join('\n');
   }
+
+  // ========================================
+  // 의존성 체인 분석 메서드 (자동 제약조건 탐지)
+  // ========================================
+
+  /**
+   * CUSTOM_EVENT 트리거의 의존성 체인을 분석하여 숨겨진 제약조건을 탐지합니다.
+   * 이 메서드는 이벤트 메타데이터 생성 시 자동으로 호출되어야 합니다.
+   *
+   * @param eventName 분석할 이벤트명
+   * @returns 의존성 체인 정보와 탐지된 제약조건
+   */
+  analyzeDependencyChain(eventName: string): DependencyChainAnalysis {
+    const result = this.analyze();
+    const tag = result.tags.find(t => t.eventName === eventName);
+
+    const analysis: DependencyChainAnalysis = {
+      eventName,
+      hasDependencyChain: false,
+      detectedPageTypes: [],
+      detectedConstraints: [],
+      sourceTags: [],
+      windowVariableDependency: null,
+      validationNotes: [],
+    };
+
+    if (!tag) {
+      analysis.validationNotes.push(`이벤트 '${eventName}'에 대한 GA4 태그를 찾을 수 없습니다.`);
+      return analysis;
+    }
+
+    // CUSTOM_EVENT 트리거인지 확인
+    const hasCustomEventTrigger = tag.triggers.some(t => t.type === 'CUSTOM_EVENT');
+    if (!hasCustomEventTrigger) {
+      analysis.validationNotes.push('CUSTOM_EVENT 트리거가 아니므로 의존성 체인 분석이 필요하지 않습니다.');
+      return analysis;
+    }
+
+    // 의존성 체인 분석
+    const depChain = this.constraintValidator.findDataLayerPushSource(eventName);
+    if (!depChain) {
+      analysis.validationNotes.push(`dataLayer.push 소스를 찾을 수 없습니다. 개발 코드에서 직접 push되는 것으로 추정됩니다.`);
+      return analysis;
+    }
+
+    analysis.hasDependencyChain = true;
+
+    // 소스 태그 정보 추출
+    for (const sourceTag of depChain.sourceTags) {
+      analysis.sourceTags.push({
+        tagId: sourceTag.tagId,
+        tagName: sourceTag.tagName,
+        triggerConditions: sourceTag.triggers.map(t => ({
+          triggerId: t.triggerId,
+          triggerName: t.triggerName,
+          triggerType: t.triggerType,
+          conditions: t.conditions,
+        })),
+      });
+    }
+
+    // 페이지 타입 제약조건 추출
+    for (const constraint of depChain.pageTypeConstraints) {
+      analysis.detectedConstraints.push({
+        type: 'PAGE_TYPE',
+        source: constraint.source,
+        condition: constraint.condition,
+        value: constraint.pageTypes.join('|'),
+      });
+
+      // 페이지 타입 목록 추가
+      for (const pt of constraint.pageTypes) {
+        if (!analysis.detectedPageTypes.includes(pt)) {
+          analysis.detectedPageTypes.push(pt);
+        }
+      }
+    }
+
+    // window 변수 의존성 확인
+    if (depChain.windowVariableDependency) {
+      analysis.windowVariableDependency = {
+        variableName: depChain.windowVariableDependency,
+        creatorTagId: depChain.variableCreatorTag?.tagId || null,
+        creatorTagName: depChain.variableCreatorTag?.tagName || null,
+        creatorConditions: depChain.variableCreatorTag?.triggerConditions || [],
+      };
+
+      // 변수 생성 태그의 조건에서 페이지 타입 추출
+      if (depChain.variableCreatorTag) {
+        for (const cond of depChain.variableCreatorTag.triggerConditions) {
+          // Content Group 조건 파싱
+          const match = cond.condition.match(/MATCH_REGEX\s+"([^"]+)"/);
+          if (match) {
+            const pageTypes = match[1].split('|').map(p => p.trim()).filter(p => p.length > 0);
+            analysis.detectedConstraints.push({
+              type: 'PAGE_TYPE',
+              source: `window.${depChain.windowVariableDependency} creator (Tag ${depChain.variableCreatorTag.tagId})`,
+              condition: cond.condition,
+              value: pageTypes.join('|'),
+            });
+
+            for (const pt of pageTypes) {
+              if (!analysis.detectedPageTypes.includes(pt)) {
+                analysis.detectedPageTypes.push(pt);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 검증 노트 생성
+    if (analysis.detectedPageTypes.length > 0) {
+      analysis.validationNotes.push(
+        `✅ 페이지 타입 제한 감지: ${analysis.detectedPageTypes.join(', ')}`
+      );
+    } else {
+      analysis.validationNotes.push(
+        '⚠️ 페이지 타입 제한이 감지되지 않았습니다. 모든 페이지에서 발생 가능할 수 있습니다.'
+      );
+    }
+
+    return analysis;
+  }
+
+  /**
+   * 모든 CUSTOM_EVENT 기반 이벤트의 의존성 체인을 분석합니다.
+   */
+  analyzeAllDependencyChains(): Map<string, DependencyChainAnalysis> {
+    const result = this.analyze();
+    const analysisMap = new Map<string, DependencyChainAnalysis>();
+
+    // CUSTOM_EVENT 트리거를 사용하는 이벤트 필터링
+    const customEventTags = result.tags.filter(tag =>
+      tag.triggers.some(t => t.type === 'CUSTOM_EVENT')
+    );
+
+    // 중복 제거
+    const eventNames = [...new Set(customEventTags.map(t => t.eventName))];
+
+    for (const eventName of eventNames) {
+      const analysis = this.analyzeDependencyChain(eventName);
+      if (analysis.hasDependencyChain || analysis.detectedConstraints.length > 0) {
+        analysisMap.set(eventName, analysis);
+      }
+    }
+
+    return analysisMap;
+  }
+
+  /**
+   * 이벤트 제약조건 검증을 수행하고 누락된 제약조건을 반환합니다.
+   */
+  validateEventConstraints(eventName: string): ConstraintValidationSummary {
+    const constraintResults = this.constraintValidator.validateEventConstraints(eventName);
+    const depChainAnalysis = this.analyzeDependencyChain(eventName);
+
+    const summary: ConstraintValidationSummary = {
+      eventName,
+      hasDirectConstraints: false,
+      hasDependencyChainConstraints: depChainAnalysis.hasDependencyChain,
+      detectedPageTypes: depChainAnalysis.detectedPageTypes,
+      missingConstraintWarnings: [],
+      recommendedPageTypes: [],
+    };
+
+    // 직접 제약조건 확인
+    for (const result of constraintResults) {
+      if (result.constraints.length > 0) {
+        summary.hasDirectConstraints = true;
+      }
+
+      // 누락 경고 수집
+      for (const missing of result.missingConstraints) {
+        summary.missingConstraintWarnings.push({
+          severity: missing.severity,
+          type: missing.type,
+          message: missing.reason,
+          recommendation: missing.recommendation,
+        });
+      }
+    }
+
+    // 의존성 체인에서 발견된 페이지 타입 권장
+    if (depChainAnalysis.detectedPageTypes.length > 0) {
+      summary.recommendedPageTypes = depChainAnalysis.detectedPageTypes;
+    }
+
+    return summary;
+  }
+}
+
+/**
+ * 의존성 체인 분석 결과
+ */
+export interface DependencyChainAnalysis {
+  eventName: string;
+  hasDependencyChain: boolean;
+  detectedPageTypes: string[];
+  detectedConstraints: {
+    type: 'PAGE_TYPE' | 'URL_PATTERN' | 'COOKIE' | 'OTHER';
+    source: string;
+    condition: string;
+    value: string;
+  }[];
+  sourceTags: {
+    tagId: string;
+    tagName: string;
+    triggerConditions: {
+      triggerId: string;
+      triggerName: string;
+      triggerType: string;
+      conditions: { type: string; variable: string; value: string }[];
+    }[];
+  }[];
+  windowVariableDependency: {
+    variableName: string;
+    creatorTagId: string | null;
+    creatorTagName: string | null;
+    creatorConditions: { triggerId: string; triggerName: string; condition: string }[];
+  } | null;
+  validationNotes: string[];
+}
+
+/**
+ * 제약조건 검증 요약
+ */
+export interface ConstraintValidationSummary {
+  eventName: string;
+  hasDirectConstraints: boolean;
+  hasDependencyChainConstraints: boolean;
+  detectedPageTypes: string[];
+  missingConstraintWarnings: {
+    severity: 'HIGH' | 'MEDIUM' | 'LOW';
+    type: string;
+    message: string;
+    recommendation: string;
+  }[];
+  recommendedPageTypes: string[];
 }
 
 /**
