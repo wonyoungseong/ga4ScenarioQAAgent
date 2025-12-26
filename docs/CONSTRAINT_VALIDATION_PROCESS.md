@@ -1,5 +1,48 @@
 # GTM 제약조건 검증 프로세스
 
+## 0. 빠른 시작 (LLM/개발자용)
+
+### ⚠️ 새 이벤트 추가 시 필수 체크
+
+**CUSTOM_EVENT 트리거인 경우 반드시 의존성 체인 분석을 실행하세요!**
+
+```typescript
+// ✅ 권장: EventMetadataFactory 사용 (자동 검증)
+import { EventMetadataFactory } from './config/eventMetadataFactory';
+
+const factory = new EventMetadataFactory('./GTM-5FK5X5C4_workspace112.json');
+const result = factory.createEventMetadata({
+  eventName: 'new_custom_event',
+  displayName: '새 커스텀 이벤트',
+  description: '설명',
+  fireType: 'userAction',
+  // pageTypes를 지정하지 않으면 자동 감지 시도!
+});
+
+// 결과 확인
+console.log(result.validation);  // 검증 결과
+console.log(result.warnings);    // 경고 메시지
+console.log(result.metadata.pageTypes);  // 자동 감지된 pageTypes
+```
+
+### 왜 이게 중요한가?
+
+```
+CUSTOM_EVENT 트리거의 함정:
+
+GTM 트리거 (직접 분석)     숨겨진 제약조건 (놓치기 쉬움)
+┌─────────────────────┐    ┌─────────────────────────────┐
+│ _event = "xxx"      │    │ HTML 태그 → window 변수     │
+│ 페이지 필터: 없음   │ → │ → window 변수 생성 태그     │
+│                     │    │   → 여기에 PAGE_TYPE 조건!  │
+└─────────────────────┘    └─────────────────────────────┘
+        ↓                              ↓
+  "모든 페이지 발생"으로    실제로는 특정 페이지에서만 발생
+  잘못 판단할 수 있음
+```
+
+---
+
 ## 1. 개요
 
 GTM 태그/트리거 분석 시 누락될 수 있는 제약조건을 자동으로 감지하고 관리하는 프로세스입니다.

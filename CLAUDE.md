@@ -74,6 +74,64 @@ output/                         # 분석 결과 출력
 2. `guides/NEW_EVENT.md` 파일 편집
 3. 이벤트 정의, 시각적 판단 기준, 예시 작성
 
+## ⚠️ 이벤트 메타데이터 추가 시 필수 체크 (CRITICAL)
+
+**CUSTOM_EVENT 트리거를 사용하는 이벤트는 반드시 의존성 체인 분석을 수행해야 합니다!**
+
+### 왜 중요한가?
+
+GTM의 CUSTOM_EVENT 트리거는 `dataLayer.push({event: "xxx"})`만 확인합니다.
+실제 페이지 제한은 **숨겨진 의존성 체인**에 있을 수 있습니다:
+
+```
+GA4 Tag → CUSTOM_EVENT Trigger (조건 없음으로 보임)
+              ↑
+      HTML 태그의 dataLayer.push
+              ↑
+      window 변수 확인 (if window.xxx)
+              ↑
+      window 변수 생성 태그 ← 여기에 PAGE_TYPE 조건 존재!
+```
+
+### 권장 방법: EventMetadataFactory 사용
+
+```typescript
+import { EventMetadataFactory } from './config/eventMetadataFactory';
+
+const factory = new EventMetadataFactory('./GTM-5FK5X5C4_workspace112.json');
+const result = factory.createEventMetadata({
+  eventName: 'new_event',
+  displayName: '새 이벤트',
+  description: '설명',
+  fireType: 'userAction',
+  // pageTypes를 지정하지 않으면 자동 감지 시도!
+});
+
+// 자동으로 수행:
+// 1. CUSTOM_EVENT 트리거 감지
+// 2. 의존성 체인 분석
+// 3. pageTypes 자동 추출
+// 4. 경고/권장사항 출력
+```
+
+### 수동 확인이 필요한 경우
+
+```bash
+# 의존성 체인 분석
+npx ts-node src/test-dependency-chain.ts
+
+# 제약조건 검증
+npx ts-node src/analyzers/gtmConstraintValidator.ts
+```
+
+### 체크리스트
+
+- [ ] 트리거 타입 확인 (CUSTOM_EVENT인가?)
+- [ ] CUSTOM_EVENT라면 `factory.createEventMetadata()` 사용
+- [ ] 자동 감지된 pageTypes 확인
+- [ ] 경고 메시지 검토
+- [ ] `dependencyChain` 필드가 메타데이터에 포함되었는지 확인
+
 ## Key Files
 
 - `guides/*.md`: 이벤트별 가이드 (AI system prompt로 사용)
