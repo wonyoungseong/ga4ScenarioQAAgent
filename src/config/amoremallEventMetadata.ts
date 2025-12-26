@@ -539,12 +539,13 @@ export function createEventMetadataList(): EventMetadata[] {
   });
 
   // click_with_duration (클릭 후 체류시간 측정)
+  // 주의: HTML - Create Scroll Duration 태그가 MAIN|PRODUCT_DETAIL|EVENT_DETAIL에서만 실행됨
   events.push({
     eventName: 'click_with_duration',
     displayName: '클릭 체류시간',
-    description: '사용자가 클릭한 후 페이지에서의 체류시간을 스크롤 깊이별로 측정',
+    description: '사용자가 클릭한 후 페이지에서의 체류시간을 스크롤 깊이별로 측정. window.durationArray가 생성된 페이지에서만 발생.',
     fireType: 'userAction',
-    pageTypes: ['ALL'],
+    pageTypes: ['MAIN', 'PRODUCT_DETAIL', 'EVENT_DETAIL'],
     trigger: {
       selectors: [],
       actionType: 'custom',
@@ -563,6 +564,24 @@ export function createEventMetadataList(): EventMetadata[] {
       triggerName: 'CE - Click with Duration Trigger',
       triggerType: 'CUSTOM_EVENT',
       customEventFilter: '_event = "click_with_duration"',
+      additionalFilter: 'Depends on HTML - Create Scroll Duration (Tag 319) which requires LT - Content Group = "MAIN|PRODUCT_DETAIL|EVENT_DETAIL"',
+    },
+    dependencyChain: {
+      description: 'window.durationArray가 존재해야 dataLayer.push 발생',
+      prerequisiteTags: [
+        {
+          tagId: '319',
+          tagName: 'HTML - Create Scroll Duration',
+          triggerId: '288',
+          triggerCondition: 'LT - Content Group MATCH_REGEX "MAIN|PRODUCT_DETAIL|EVENT_DETAIL"',
+        },
+        {
+          tagId: '578',
+          tagName: 'HTML - Push Scroll Duration',
+          triggerId: '576',
+          triggerCondition: 'All Link Clicks (window.durationArray 확인 후 push)',
+        },
+      ],
     },
   });
 

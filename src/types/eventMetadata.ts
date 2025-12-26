@@ -238,6 +238,38 @@ export interface EventMetadata {
 
   /** 캠페인 한정 정보 (캠페인 특정 이벤트인 경우) */
   campaignInfo?: CampaignInfo;
+
+  /** 의존성 체인 (다른 태그에 의존하는 경우) */
+  dependencyChain?: DependencyChain;
+}
+
+/**
+ * 이벤트 의존성 체인 정보
+ * CUSTOM_EVENT 트리거가 다른 HTML 태그에서 dataLayer.push를 받는 경우
+ */
+export interface DependencyChain {
+  /** 의존성 설명 */
+  description: string;
+
+  /** 선행 태그 목록 */
+  prerequisiteTags: PrerequisiteTag[];
+}
+
+/**
+ * 선행 태그 정보
+ */
+export interface PrerequisiteTag {
+  /** 태그 ID */
+  tagId: string;
+
+  /** 태그 이름 */
+  tagName: string;
+
+  /** 트리거 ID */
+  triggerId: string;
+
+  /** 트리거 조건 */
+  triggerCondition: string;
 }
 
 /**
