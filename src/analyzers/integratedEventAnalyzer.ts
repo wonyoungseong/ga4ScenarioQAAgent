@@ -495,17 +495,29 @@ export class IntegratedEventAnalyzer {
       return undefined;
     }
 
+    // summary에서 standard/custom 대신 eventParams/userProperties 사용
+    const standardCount = params.parameters.filter(p => !p.isCustomDimension).length;
+    const customCount = params.parameters.filter(p => p.isCustomDimension).length;
+
+    // category 타입을 'common' | 'event' | 'user' | 'item'으로 매핑
+    const mapCategory = (cat: string): 'common' | 'event' | 'user' | 'item' => {
+      if (cat === 'event_common' || cat === 'page_location') return 'common';
+      if (cat === 'event_specific' || cat === 'conditional') return 'event';
+      if (cat === 'user_id' || cat === 'user_property') return 'user';
+      return cat as 'common' | 'event' | 'user' | 'item';
+    };
+
     return {
       total: params.summary.total,
-      standard: params.summary.standard,
-      custom: params.summary.custom,
+      standard: standardCount,
+      custom: customCount,
       hasItems: params.hasItems,
       parameters: params.parameters.map(p => ({
         ga4Key: p.ga4Key,
         devGuideVar: p.devGuideVar,
         ga4ApiDimension: p.ga4ApiDimension,
         isCustomDimension: p.isCustomDimension,
-        category: p.category,
+        category: mapCategory(p.category),
         description: p.description,
       })),
     };

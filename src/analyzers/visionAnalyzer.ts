@@ -16,12 +16,46 @@ import {
   SCENARIO_TEMPLATES,
 } from '../scenario/funnelScenarioDesigner';
 
+/**
+ * 파라미터 값 예측 결과
+ */
+export interface PredictedParameter {
+  /** 파라미터 이름 */
+  name: string;
+  /** 예측된 값 */
+  value: string | number | null;
+  /** 예측 소스 (URL, VISION, CONSTANT 등) */
+  source: 'URL' | 'VISION' | 'CONSTANT' | 'COMPUTED' | 'CONTEXT';
+  /** 예측 확신도 */
+  confidence: 'high' | 'medium' | 'low';
+  /** 예측 근거 */
+  extractionReason: string;
+}
+
+/**
+ * items 배열 파라미터 예측
+ */
+export interface PredictedItem {
+  item_id?: string;
+  item_name?: string;
+  item_brand?: string;
+  item_category?: string;
+  price?: number;
+  quantity?: number;
+  index?: number;
+  [key: string]: string | number | undefined;
+}
+
 export interface VisionAnalysisResult {
   shouldFire: VisionScenario[];
   shouldNotFire: VisionScenario[];
   reasoning: string;
   gtmAnalysis?: string;  // GTM 트리거 분석 결과
   parameterInfo?: string;  // 파라미터 스펙 정보
+  /** 예측된 파라미터 값들 */
+  predictedParameters?: PredictedParameter[];
+  /** 예측된 items 배열 (ecommerce 이벤트) */
+  predictedItems?: PredictedItem[];
 }
 
 export interface GTMContext {
@@ -183,6 +217,7 @@ export class GeminiVisionAnalyzer {
   private guidesDir: string;
   private specLoader: SpecLoader | null;
   private currentSiteId: string | null = null;
+  private predictionRules: any = null;
 
   constructor(apiKey: string, guidesDir: string = './guides', specLoader?: SpecLoader) {
     this.genAI = new GoogleGenerativeAI(apiKey);
@@ -191,6 +226,79 @@ export class GeminiVisionAnalyzer {
     });
     this.guidesDir = guidesDir;
     this.specLoader = specLoader || null;
+    this.loadPredictionRules();
+  }
+
+  /**
+   * 파라미터 예측 규칙 로드
+   */
+  private loadPredictionRules(): void {
+    try {
+      const rulesPath = path.join(process.cwd(), 'config', 'event-prediction-rules.json');
+      if (fs.existsSync(rulesPath)) {
+        this.predictionRules = JSON.parse(fs.readFileSync(rulesPath, 'utf-8'));
+      }
+    } catch (e) {
+      console.warn('파라미터 예측 규칙 로드 실패:', e);
+    }
+  }
+
+  /**
+   * 이벤트별 파라미터 예측 프롬프트 생성
+   */
+  private getParameterPredictionPrompt(eventName: string, pageUrl: string): string {
+    if (!this.predictionRules?.events?.[eventName]) {
+      return '';
+    }
+
+    const eventRules = this.predictionRules.events[eventName];
+    const params = eventRules.parameters || {};
+    const itemsRequired = eventRules.itemsRequired || false;
+
+    let prompt = `\n## 파라미터 값 예측 (필수)\n`;
+    prompt += `이 이벤트(${eventName})의 파라미터 값을 예측하세요:\n\n`;
+
+    // 각 파라미터별 예측 지시
+    for (const [paramName, paramConfig] of Object.entries(params) as [string, any][]) {
+      const source = paramConfig.source || 'VISION';
+      const hint = paramConfig.hint || '';
+      const patterns = paramConfig.patterns || [];
+
+      prompt += `- **${paramName}**:\n`;
+      prompt += `  - 소스: ${source}\n`;
+      if (hint) prompt += `  - 힌트: ${hint}\n`;
+      if (patterns.length > 0) {
+        prompt += `  - URL 패턴: ${patterns.join(', ')}\n`;
+        // URL에서 직접 추출 시도
+        for (const pattern of patterns) {
+          try {
+            const regex = new RegExp(pattern);
+            const match = pageUrl.match(regex);
+            if (match && match[1]) {
+              prompt += `  - URL에서 추출: "${match[1]}"\n`;
+              break;
+            }
+          } catch (e) { /* ignore invalid regex */ }
+        }
+      }
+      prompt += '\n';
+    }
+
+    // items 배열 필요 시
+    if (itemsRequired) {
+      prompt += `\n### items 배열 예측\n`;
+      prompt += `화면에서 보이는 상품 정보를 items 배열로 추출하세요:\n`;
+      prompt += `- item_id: 상품 고유 ID (URL 또는 데이터 속성에서)\n`;
+      prompt += `- item_name: 상품명 (화면에서 가장 큰 제목)\n`;
+      prompt += `- item_brand: 브랜드명 (상품명 위/옆의 브랜드 로고나 텍스트)\n`;
+      prompt += `- price: 판매가격 (숫자만, '원' 제외)\n`;
+      prompt += `- quantity: 수량 (기본값 1)\n`;
+      if (eventRules.itemsHint) {
+        prompt += `\n힌트: ${eventRules.itemsHint}\n`;
+      }
+    }
+
+    return prompt;
   }
 
   /**
@@ -280,11 +388,17 @@ ${guide}
       systemPrompt += `\n\n${paramSpec}`;
     }
 
+    // 파라미터 예측 규칙 추가
+    const paramPredictionPrompt = this.getParameterPredictionPrompt(eventName, pageUrl);
+    if (paramPredictionPrompt) {
+      systemPrompt += paramPredictionPrompt;
+    }
+
     const userPrompt = `## 분석할 페이지
 URL: ${pageUrl}
 
 ## 요청
-이 스크린샷을 분석하여 ${eventName} 이벤트에 대한 시나리오를 생성해주세요.
+이 스크린샷을 분석하여 ${eventName} 이벤트에 대한 시나리오와 **파라미터 값**을 예측해주세요.
 
 다음 JSON 형식으로 응답해주세요:
 \`\`\`json
@@ -307,7 +421,25 @@ URL: ${pageUrl}
       "confidence": "high|medium|low"
     }
   ],
-  "reasoning": "전체적인 분석 요약 및 페이지 구조에 대한 이해"
+  "reasoning": "전체적인 분석 요약 및 페이지 구조에 대한 이해",
+  "predictedParameters": [
+    {
+      "name": "파라미터명 (예: item_id, item_name, price)",
+      "value": "예측된 값 (문자열 또는 숫자)",
+      "source": "URL|VISION|CONSTANT|COMPUTED",
+      "confidence": "high|medium|low",
+      "extractionReason": "값을 추출한 근거 (예: URL의 onlineProdCode 파라미터에서 추출)"
+    }
+  ],
+  "predictedItems": [
+    {
+      "item_id": "상품 고유 ID",
+      "item_name": "상품명",
+      "item_brand": "브랜드명",
+      "price": 가격(숫자),
+      "quantity": 수량(숫자)
+    }
+  ]
 }
 \`\`\`
 
@@ -1548,7 +1680,7 @@ ${expectedChannel !== 'DETECT_FROM_SCREENSHOT' ? `- channel: "${expectedChannel}
     "site_env": "${expectedEnv}",
     "channel": "${expectedChannel !== 'DETECT_FROM_SCREENSHOT' ? expectedChannel : 'PC 또는 MO'}",
     "content_group": "pageType과 동일",
-    "login_is_login": "N 또는 Y"
+    "login_is_login": "N (기본값. 아래 조건 충족 시에만 Y)"
   },
   "pageLocationVariables": {
     "page_location_1": "breadcrumb 1뎁스 또는 null",
@@ -1603,7 +1735,12 @@ ${expectedChannel !== 'DETECT_FROM_SCREENSHOT' ? `- channel: "${expectedChannel}
    - 화면에서 명확히 보이는 텍스트는 반드시 추출하세요
    - 화면에서 확인 불가능한 경우에만 null
 6. **product_id, view_event_code 등은 URL에서 추출** (onlineProdSn, product_no, /product/숫자 등)
-7. **null이 아닌 실제 값 우선**: 화면에 상품명, 가격이 보이면 반드시 해당 값을 입력하세요`;
+7. **null이 아닌 실제 값 우선**: 화면에 상품명, 가격이 보이면 반드시 해당 값을 입력하세요
+8. **login_is_login 판단 기준** (기본값 N, 아래 조건 모두 충족 시에만 Y):
+   - 헤더에 "로그인" 버튼이 아닌 사용자 프로필/이름이 보임 (예: "OOO님", 프로필 아이콘)
+   - "로그아웃" 버튼이 보임
+   - "마이페이지" 영역에 실제 사용자 정보(포인트, 쿠폰 수 등)가 표시됨
+   - 단순히 "로그인" 링크만 있거나 정보가 불분명하면 무조건 N`;
 
     try {
       const result = await this.model.generateContent([
