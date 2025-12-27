@@ -843,6 +843,114 @@ export class GA4Client {
   }
 
   /**
+   * URL별 파라미터 값 변동성 분석
+   *
+   * 동일 URL(pagePath)에서 파라미터 값이 일관되는지 확인합니다.
+   */
+  async analyzeParameterByUrl(
+    eventName: string,
+    parameterName: string,
+    options: GA4QueryOptions = {}
+  ): Promise<{
+    pagePath: string;
+    uniqueValues: number;
+    totalEvents: number;
+    topValues: Array<{ value: string; count: number; percentage: number }>;
+    urlConsistency: 'URL_FIXED' | 'URL_LOW_VAR' | 'URL_VARIABLE';
+  }[]> {
+    this.ensureInitialized();
+    const { startDate = '7daysAgo', endDate = 'today', limit = 1000 } = options;
+
+    const dimensionName = parameterName.startsWith('customEvent:')
+      ? parameterName
+      : `customEvent:${parameterName}`;
+
+    const [response] = await this.client!.runReport({
+      property: `properties/${this.propertyId}`,
+      dateRanges: [{ startDate, endDate }],
+      dimensions: [
+        { name: 'pagePath' },
+        { name: dimensionName },
+      ],
+      metrics: [{ name: 'eventCount' }],
+      dimensionFilter: {
+        filter: {
+          fieldName: 'eventName',
+          stringFilter: { value: eventName, matchType: 'EXACT' },
+        },
+      },
+      limit,
+      orderBys: [
+        { metric: { metricName: 'eventCount' }, desc: true },
+      ],
+    });
+
+    if (!response.rows) {
+      return [];
+    }
+
+    // pagePath별로 그룹화
+    const byPath = new Map<string, Map<string, number>>();
+    for (const row of response.rows) {
+      const pagePath = row.dimensionValues?.[0]?.value || '';
+      const paramValue = row.dimensionValues?.[1]?.value || '';
+      const count = parseInt(row.metricValues?.[0]?.value || '0');
+
+      if (paramValue === '(not set)') continue;
+
+      if (!byPath.has(pagePath)) {
+        byPath.set(pagePath, new Map());
+      }
+      const existing = byPath.get(pagePath)!.get(paramValue) || 0;
+      byPath.get(pagePath)!.set(paramValue, existing + count);
+    }
+
+    // 결과 생성
+    const results: Array<{
+      pagePath: string;
+      uniqueValues: number;
+      totalEvents: number;
+      topValues: Array<{ value: string; count: number; percentage: number }>;
+      urlConsistency: 'URL_FIXED' | 'URL_LOW_VAR' | 'URL_VARIABLE';
+    }> = [];
+
+    for (const [pagePath, values] of byPath.entries()) {
+      const totalEvents = [...values.values()].reduce((s, c) => s + c, 0);
+      const uniqueValues = values.size;
+
+      const sortedValues = [...values.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([value, count]) => ({
+          value: value.length > 40 ? value.substring(0, 37) + '...' : value,
+          count,
+          percentage: (count / totalEvents) * 100,
+        }));
+
+      let urlConsistency: 'URL_FIXED' | 'URL_LOW_VAR' | 'URL_VARIABLE';
+      if (uniqueValues === 1) {
+        urlConsistency = 'URL_FIXED';
+      } else if (sortedValues[0]?.percentage >= 90) {
+        urlConsistency = 'URL_LOW_VAR';
+      } else {
+        urlConsistency = 'URL_VARIABLE';
+      }
+
+      results.push({
+        pagePath,
+        uniqueValues,
+        totalEvents,
+        topValues: sortedValues.slice(0, 5),
+        urlConsistency,
+      });
+    }
+
+    // 이벤트 수 기준 정렬
+    results.sort((a, b) => b.totalEvents - a.totalEvents);
+
+    return results;
+  }
+
+  /**
    * 이벤트별 파라미터 값 조회
    *
    * 특정 이벤트의 특정 파라미터가 어떤 값으로 수집되었는지 조회합니다.
@@ -850,19 +958,53 @@ export class GA4Client {
   async getEventParameterValues(
     eventName: string,
     parameterName: string,
-    options: GA4QueryOptions = {}
+    options: GA4QueryOptions & { contentGroup?: string } = {}
   ): Promise<{
     value: string;
     eventCount: number;
     proportion: number;
   }[]> {
     this.ensureInitialized();
-    const { startDate = '7daysAgo', endDate = 'today', limit = 100 } = options;
+    const { startDate = '7daysAgo', endDate = 'today', limit = 100, contentGroup } = options;
 
     // customEvent: prefix로 파라미터 조회
     const dimensionName = parameterName.startsWith('customEvent:')
       ? parameterName
       : `customEvent:${parameterName}`;
+
+    // 필터 구성 - eventName 필터 + content_group 필터 (있는 경우)
+    let dimensionFilter: any;
+    if (contentGroup) {
+      // content_group 필터 추가
+      dimensionFilter = {
+        andGroup: {
+          expressions: [
+            {
+              filter: {
+                fieldName: 'eventName',
+                stringFilter: { value: eventName },
+              },
+            },
+            {
+              filter: {
+                fieldName: 'customEvent:content_group',
+                stringFilter: {
+                  matchType: 'EXACT',
+                  value: contentGroup,
+                },
+              },
+            },
+          ],
+        },
+      };
+    } else {
+      dimensionFilter = {
+        filter: {
+          fieldName: 'eventName',
+          stringFilter: { value: eventName },
+        },
+      };
+    }
 
     try {
       const [response] = await this.client!.runReport({
@@ -870,12 +1012,7 @@ export class GA4Client {
         dateRanges: [{ startDate, endDate }],
         dimensions: [{ name: dimensionName }],
         metrics: [{ name: 'eventCount' }],
-        dimensionFilter: {
-          filter: {
-            fieldName: 'eventName',
-            stringFilter: { value: eventName },
-          },
-        },
+        dimensionFilter,
         limit,
         orderBys: [
           { metric: { metricName: 'eventCount' }, desc: true },

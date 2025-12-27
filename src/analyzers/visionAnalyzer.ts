@@ -101,6 +101,36 @@ export interface ExpectedDataFromVision {
   mustValidate: boolean;
 }
 
+/**
+ * 누락된 기대 요소 (기획자/마케터 관점)
+ */
+export interface MissingElement {
+  /** 누락된 요소 이름 */
+  element: string;
+  /** 심각도 */
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM';
+  /** 있어야 하는 이유 */
+  reason: string;
+  /** 관련 GA4 이벤트 */
+  relatedEvent: string | null;
+  /** 비즈니스 영향 */
+  businessImpact: string;
+  /** 가능한 원인 추정 */
+  possibleCause: string;
+}
+
+/**
+ * 기획자/마케터 관점의 요소 이상 분석 결과
+ */
+export interface ElementAnomalies {
+  /** 누락된 기대 요소들 */
+  missingElements: MissingElement[];
+  /** 발견된 기대 요소들 */
+  presentElements: string[];
+  /** 전반적 평가 */
+  overallAssessment: '정상' | '주의필요' | '심각';
+}
+
 export interface VisionScenario {
   elementDescription: string;
   location: string;
@@ -1688,8 +1718,47 @@ ${JSON.stringify(rules.step1_pageType?.rules || {}, null, 2)}
 페이지 타입별 자동 발생 이벤트:
 ${JSON.stringify(rules.step3_events?.autoFire || {}, null, 2)}
 
+조건부 발생 이벤트 (UI 요소가 보일 때):
+${JSON.stringify(rules.step3_events?.conditional || {}, null, 2)}
+
+**중요**: 구매 관련 버튼(장바구니, 바로구매, 구매하기)이 보이면 add_to_cart 이벤트가 발생할 수 있습니다.
+
 발생하면 안 되는 이벤트:
-${JSON.stringify(rules.step3_events?.forbidden || {}, null, 2)}`;
+${JSON.stringify(rules.step3_events?.forbidden || {}, null, 2)}
+
+## 🔍 기획자/마케터 관점 분석 (필수!)
+
+**중요**: 당신은 웹사이트 기획자/마케터의 시선으로 이 페이지를 분석해야 합니다.
+해당 페이지 타입에서 비즈니스적으로 반드시 있어야 하는 요소가 없으면 **의심스러운 상황**으로 보고하세요.
+
+### 페이지 타입별 기대 요소:
+
+**PRODUCT_DETAIL** (상품 상세 페이지):
+- 🔴 CRITICAL: 장바구니/담기 버튼 → 없으면 구매 전환 불가
+- 🔴 CRITICAL: 상품 가격 → 없으면 구매 결정 불가
+- 🔴 CRITICAL: 상품명 → 상품 식별 불가
+- 🟠 HIGH: 바로구매 버튼 → 빠른 구매 경로 부재
+- 🟠 HIGH: 브랜드명 → 브랜드 인지 부족
+
+**PRODUCT_LIST / SEARCH_RESULT** (상품 목록):
+- 🔴 CRITICAL: 상품 카드 (썸네일 + 가격) → 핵심 콘텐츠 부재
+- 🟠 HIGH: 상품 클릭 영역 → 상세 진입 불가
+
+**CART** (장바구니):
+- 🔴 CRITICAL: 주문하기/결제하기 버튼 → 구매 완료 불가
+- 🔴 CRITICAL: 담긴 상품 목록 → 장바구니 확인 불가
+
+**ORDER** (주문서):
+- 🔴 CRITICAL: 결제하기 버튼 → 주문 완료 불가
+- 🔴 CRITICAL: 배송지 정보 영역 → 배송 불가
+
+### 분석 지침:
+1. 화면에서 위 요소들을 찾으세요
+2. 발견된 요소는 presentElements에 기록
+3. **없는 요소**는 missingElements에 상세히 보고:
+   - 왜 있어야 하는지 (reason)
+   - 비즈니스 영향 (businessImpact)
+   - 가능한 원인 추정 (possibleCause): "버튼이 숨겨져 있음", "로딩 오류", "기획에서 제외됨" 등`;
 
     // === 2단계: 페이지 타입별 specialized 프롬프트 생성 ===
     const pageTypeHint = detectedPageType;
@@ -1796,9 +1865,23 @@ ${comprehensiveCheckPrompt}
     ${conditionalVarsExample}
   },
   "events": {
-    "autoFire": ["페이지 타입별 자동 이벤트"],
-    "conditional": [],
+    "autoFire": ["페이지 타입별 자동 이벤트 - 예: PRODUCT_DETAIL이면 page_view, view_item"],
+    "conditional": ["UI 요소 기반 이벤트 - 예: 장바구니/구매 버튼 있으면 add_to_cart, 상품 목록 있으면 select_item"],
     "forbidden": ["페이지 타입별 금지 이벤트"]
+  },
+  "elementAnomalies": {
+    "missingElements": [
+      {
+        "element": "누락된 요소명 (예: 장바구니 버튼)",
+        "severity": "CRITICAL|HIGH|MEDIUM",
+        "reason": "왜 있어야 하는지 (예: 구매 전환 불가)",
+        "relatedEvent": "관련 GA4 이벤트 또는 null",
+        "businessImpact": "비즈니스 영향 (예: 구매 퍼널 진입 불가로 매출 손실)",
+        "possibleCause": "가능한 원인 (예: 버튼이 숨겨져 있음, 로딩 오류, 기획에서 제외됨)"
+      }
+    ],
+    "presentElements": ["발견된 기대 요소들 (예: 상품명, 가격, 브랜드명)"],
+    "overallAssessment": "전반적 평가 (정상/주의필요/심각)"
   },
   "reasoning": "판단 근거"
 }
@@ -1926,6 +2009,15 @@ ${pageTypeHint === 'PRODUCT_DETAIL' ? `**PRODUCT_DETAIL 필수 파라미터:**
 
       // URL에서 추출된 파라미터 추가 (소스 추적용)
       prediction.urlParams = urlParams as Record<string, string | number | null>;
+
+      // 4. elementAnomalies 기본값 설정 (Vision AI가 반환하지 않은 경우)
+      if (!prediction.elementAnomalies) {
+        prediction.elementAnomalies = {
+          missingElements: [],
+          presentElements: [],
+          overallAssessment: '정상'
+        };
+      }
 
       return prediction;
     } catch (error: any) {
@@ -2303,4 +2395,17 @@ export interface PageVariablePrediction {
   reasoning: string;
   /** URL에서 추출된 파라미터 (소스 추적용) */
   urlParams?: Record<string, string | number | null>;
+  /** 기획자/마케터 관점 요소 이상 분석 */
+  elementAnomalies?: {
+    missingElements: Array<{
+      element: string;
+      severity: 'CRITICAL' | 'HIGH' | 'MEDIUM';
+      reason: string;
+      relatedEvent: string | null;
+      businessImpact: string;
+      possibleCause: string;
+    }>;
+    presentElements: string[];
+    overallAssessment: '정상' | '주의필요' | '심각';
+  };
 }

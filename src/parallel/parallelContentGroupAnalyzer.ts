@@ -5,6 +5,7 @@
  * - 브라우저 풀링으로 페이지 캡처 병렬화
  * - Vision AI 배치 처리
  * - 결과 병합 및 정확도 계산
+ * - Level 2/3 파라미터 검증 (키 + 값)
  */
 import { Page } from 'playwright';
 import { BrowserPoolManager } from './browserPoolManager';
@@ -14,6 +15,18 @@ import { GTMConfigLoader, createDefaultGTMConfigLoader, PreloadedGTMConfig } fro
 import { IntegratedEventAnalyzer } from '../analyzers/integratedEventAnalyzer';
 import { PageType, detectPageTypeComprehensive, ComprehensivePageTypeResult } from '../types/pageContext';
 import { edgeCaseLoader, EdgeCase } from '../config/siteEdgeCases';
+import {
+  ParameterValidator,
+  ParameterValidationResult,
+  AggregatedValidationResult,
+  ValidationLevel,
+  PromptFeedback
+} from './parameterValidator';
+import { PredictedParameter, GA4Parameter, SpecParameter, ContentGroup } from '../branch/types';
+import { GA4ParameterCollector, createGA4ParameterCollector } from '../learning/ga4ParameterCollector';
+import { AutoLearningFeedback, createAutoLearningFeedback } from '../learning/autoLearningFeedback';
+import { ParameterValuePredictor } from '../learning/parameterValuePredictor';
+import { extractPageContext, toPageContext, ExtractedPageContext } from '../learning/pageContextExtractor';
 
 export interface ContentGroupConfig {
   contentGroup: string;
@@ -33,8 +46,22 @@ export interface ParallelAnalysisResult {
   missed: string[];
   wrong: string[];
   sessionOnceSkipped: string[];  // SESSION_ONCE 이벤트 (정확도 계산 제외)
-  accuracy: number;
+  accuracy: number;  // Level 1: 이벤트명 정확도
   processingTimeMs: number;
+
+  /** Level 2/3 파라미터 검증 결과 */
+  parameterValidation?: {
+    /** 이벤트별 파라미터 검증 결과 */
+    eventResults: ParameterValidationResult[];
+    /** 평균 키 정확도 (Level 2) */
+    avgKeyAccuracy: number;
+    /** 평균 값 정확도 (Level 3) */
+    avgValueAccuracy: number;
+    /** 종합 점수 */
+    overallScore: number;
+    /** 시스템 프롬프트 피드백 */
+    feedback: PromptFeedback[];
+  };
 }
 
 export interface ParallelAnalysisOptions {
@@ -48,6 +75,14 @@ export interface ParallelAnalysisOptions {
   pageWaitTime?: number;
   /** GA4 Property ID (Edge Case 적용용) */
   ga4PropertyId?: string;
+  /** 파라미터 검증 활성화 (기본: false) */
+  enableParameterValidation?: boolean;
+  /** 파라미터 검증 레벨 (기본: LEVEL3) */
+  validationLevel?: ValidationLevel;
+  /** GA4 파라미터 수집 활성화 - Level 3 값 검증에 필요 (기본: false) */
+  enableGA4ParameterCollection?: boolean;
+  /** 자동 학습 활성화 (기본: false) */
+  enableAutoLearning?: boolean;
 }
 
 interface PageCaptureData {
@@ -58,6 +93,12 @@ interface PageCaptureData {
   pageTypeSignals: string[];
   gtmPossibleEvents: string[];
   startTime: number;
+  /** 이벤트별 예측 파라미터 */
+  predictedParameters?: Map<string, PredictedParameter[]>;
+  /** 이벤트별 스펙 파라미터 */
+  specParameters?: Map<string, SpecParameter[]>;
+  /** 추출된 페이지 컨텍스트 (동적 값) */
+  extractedContext?: ExtractedPageContext;
 }
 
 // 자동 수집 이벤트 (예측에서 제외)
@@ -105,9 +146,16 @@ export class ParallelContentGroupAnalyzer {
   private configLoader: GTMConfigLoader;
   private preloadedConfig: PreloadedGTMConfig | null = null;
   private analyzer: IntegratedEventAnalyzer | null = null;
+  private parameterValidator: ParameterValidator | null = null;
+  private parameterCollector: GA4ParameterCollector | null = null;
+  private autoLearning: AutoLearningFeedback | null = null;
+  private valuePredictor: ParameterValuePredictor | null = null;
   private readonly apiKey: string;
   private readonly options: Required<ParallelAnalysisOptions>;
   private edgeCases: EdgeCase[] = [];
+  /** 컨텐츠 그룹 + 이벤트별 수집된 GA4 파라미터 캐시 */
+  /** 키: `${contentGroup}:${eventName}` 형식 */
+  private ga4ParameterCache: Map<string, GA4Parameter[]> = new Map();
 
   constructor(apiKey: string, options: ParallelAnalysisOptions = {}) {
     this.apiKey = apiKey;
@@ -117,7 +165,16 @@ export class ParallelContentGroupAnalyzer {
       skipVision: options.skipVision ?? false,
       pageWaitTime: options.pageWaitTime ?? 3000,
       ga4PropertyId: options.ga4PropertyId ?? '',
+      enableParameterValidation: options.enableParameterValidation ?? false,
+      validationLevel: options.validationLevel ?? ValidationLevel.LEVEL3_PARAM_VALUES,
+      enableGA4ParameterCollection: options.enableGA4ParameterCollection ?? false,
+      enableAutoLearning: options.enableAutoLearning ?? false,
     };
+
+    // 파라미터 검증기 초기화
+    if (this.options.enableParameterValidation) {
+      this.parameterValidator = new ParameterValidator(this.options.validationLevel);
+    }
 
     // Edge Cases 로드
     if (this.options.ga4PropertyId) {
@@ -156,6 +213,31 @@ export class ParallelContentGroupAnalyzer {
     // 브라우저 풀 초기화
     await this.browserPool.initialize();
 
+    // GA4 파라미터 수집기 초기화 (Level 3 값 검증용)
+    if (this.options.enableGA4ParameterCollection && this.options.ga4PropertyId) {
+      try {
+        this.parameterCollector = new GA4ParameterCollector(this.options.ga4PropertyId);
+        await this.parameterCollector.initialize();
+        console.log('📊 GA4 Parameter Collector 초기화 완료');
+      } catch (error: any) {
+        console.warn(`⚠️ GA4 Parameter Collector 초기화 실패: ${error.message}`);
+        console.warn('   Level 3 값 검증이 제한됩니다.');
+      }
+    }
+
+    // 자동 학습 시스템 초기화
+    if (this.options.enableAutoLearning && this.options.ga4PropertyId) {
+      this.autoLearning = new AutoLearningFeedback(this.options.ga4PropertyId);
+      console.log('🧠 Auto Learning Feedback 초기화 완료');
+    }
+
+    // 파라미터 값 예측기 초기화 (Level 3 값 정확도 향상)
+    if (this.options.enableParameterValidation && this.options.ga4PropertyId) {
+      this.valuePredictor = new ParameterValuePredictor(this.options.ga4PropertyId);
+      const stats = this.valuePredictor.getStats();
+      console.log(`📈 Parameter Value Predictor 초기화 완료 (규칙 ${stats.totalRules}개)`);
+    }
+
     console.log(`✅ Initialization complete (${Date.now() - startTime}ms)`);
   }
 
@@ -191,14 +273,90 @@ export class ParallelContentGroupAnalyzer {
       console.log(`\n⏭️ Phase 2: Vision AI skipped`);
     }
 
+    // Phase 2.5: GA4 파라미터 수집 (Level 3 값 검증용)
+    if (this.parameterCollector && this.options.enableGA4ParameterCollection) {
+      console.log(`\n📊 Phase 2.5: Collecting GA4 parameters...`);
+      await this.collectGA4Parameters(pageDataList);
+      console.log(`   ✅ GA4 parameter collection complete`);
+    }
+
     // Phase 3: 결과 병합 및 정확도 계산
     console.log(`\n📊 Phase 3: Merging results...`);
     const results = this.mergeResults(pageDataList, visionResults, configs);
+
+    // Phase 4: 자동 학습 (활성화된 경우)
+    if (this.autoLearning && this.options.enableAutoLearning) {
+      console.log(`\n🧠 Phase 4: Auto learning from results...`);
+      const learningResult = this.autoLearning.learnFromResults(results);
+      this.autoLearning.saveAllLearningResults();
+      console.log(`   ✅ Learned ${learningResult.newRules.length} new rules`);
+    }
 
     const totalTime = Date.now() - totalStartTime;
     console.log(`\n⏱️ Total processing time: ${totalTime}ms (${(totalTime / 1000).toFixed(1)}s)`);
 
     return results;
+  }
+
+  /**
+   * GA4 파라미터 수집 - 컨텐츠 그룹별로 수집
+   */
+  private async collectGA4Parameters(pageDataList: PageCaptureData[]): Promise<void> {
+    if (!this.parameterCollector) return;
+
+    // 컨텐츠 그룹별 이벤트 수집
+    const contentGroupEvents = new Map<string, Set<string>>();
+    for (const pd of pageDataList) {
+      const cg = pd.pageType;
+      if (!contentGroupEvents.has(cg)) {
+        contentGroupEvents.set(cg, new Set());
+      }
+      for (const event of pd.gtmPossibleEvents) {
+        contentGroupEvents.get(cg)!.add(event);
+      }
+    }
+
+    const totalCombinations = Array.from(contentGroupEvents.values())
+      .reduce((sum, events) => sum + events.size, 0);
+    console.log(`   🔍 ${contentGroupEvents.size}개 컨텐츠 그룹, ${totalCombinations}개 조합 파라미터 수집 중...`);
+
+    // 먼저 이벤트별 전체 데이터 수집 (한 번만)
+    const allEventsSet = new Set<string>();
+    for (const events of contentGroupEvents.values()) {
+      for (const event of events) {
+        allEventsSet.add(event);
+      }
+    }
+
+    // 이벤트별 전체 파라미터를 먼저 수집 (폴백용)
+    const fallbackCache = new Map<string, GA4Parameter[]>();
+    for (const eventName of allEventsSet) {
+      try {
+        const collected = await this.parameterCollector.collectEventParameters(
+          eventName,
+          '',  // 전체 데이터
+        );
+        if (collected.length > 0) {
+          fallbackCache.set(eventName, this.parameterCollector.convertToGA4Parameters(collected));
+        }
+      } catch {
+        // 오류 무시
+      }
+    }
+
+    // 컨텐츠 그룹별로 캐시 설정 (전체 데이터 사용)
+    for (const [contentGroup, events] of contentGroupEvents) {
+      for (const eventName of events) {
+        const cacheKey = `${contentGroup}:${eventName}`;
+        // 전체 데이터에서 가져오기 (컨텐츠 그룹 필터링은 GA4에서 지원 안 될 수 있음)
+        const ga4Params = fallbackCache.get(eventName);
+        if (ga4Params) {
+          this.ga4ParameterCache.set(cacheKey, ga4Params);
+        }
+      }
+    }
+
+    console.log(`   ✅ ${this.ga4ParameterCache.size}개 컨텐츠 그룹+이벤트 조합 파라미터 캐시됨`);
   }
 
   /**
@@ -249,6 +407,15 @@ export class ParallelContentGroupAnalyzer {
       // 페이지 타입 감지
       const pageTypeResult = await detectPageTypeComprehensive(page, config.url);
 
+      // 페이지 컨텍스트 추출 (동적 값: 상품명, 프로모션명, 라이브 제목 등)
+      let extractedContext: ExtractedPageContext | undefined;
+      if (this.options.enableParameterValidation) {
+        extractedContext = await extractPageContext(page);
+        if (extractedContext.actualPageType && extractedContext.actualPageType !== pageTypeResult.pageType) {
+          console.log(`   🔄 ${config.contentGroup}: dataLayer 페이지 타입 ${extractedContext.actualPageType} (URL 기반: ${pageTypeResult.pageType})`);
+        }
+      }
+
       // Non-Vision GTM 분석
       const gtmPossibleEvents = await this.runNonVisionAnalysis(
         config.url,
@@ -260,6 +427,54 @@ export class ParallelContentGroupAnalyzer {
       // 로깅
       console.log(`   📍 ${config.contentGroup}: ${pageTypeResult.pageType} (confidence: ${pageTypeResult.confidence}%)`);
 
+      // GTM 설정에서 이벤트별 스펙 파라미터 및 예측 파라미터 추출
+      const specParameters = new Map<string, SpecParameter[]>();
+      const predictedParameters = new Map<string, PredictedParameter[]>();
+
+      if (this.preloadedConfig && this.options.enableParameterValidation) {
+        // 추출된 컨텍스트를 ParameterValuePredictor용 형식으로 변환
+        const pageContext = extractedContext ? toPageContext(extractedContext) : undefined;
+
+        for (const eventName of gtmPossibleEvents) {
+          const eventParams = this.preloadedConfig.eventParameters.get(eventName);
+          if (eventParams) {
+            // 스펙 파라미터
+            const specParams: SpecParameter[] = eventParams.parameters.map(p => ({
+              ga4Key: p.key,
+              displayName: p.key,
+              dataLayerVar: p.valueSource,
+              required: p.required,
+              description: p.description,
+            }));
+            specParameters.set(eventName, specParams);
+
+            // GTM 기반 예측 파라미터 (필수 파라미터만)
+            let predictedParams: PredictedParameter[] = eventParams.parameters
+              .filter(p => p.required)
+              .map(p => ({
+                name: p.key,
+                value: null, // 실제 값은 런타임에 결정됨
+                source: 'GTM' as const,
+                confidence: 'high' as const,
+                extractionReason: `GTM 태그에서 필수 파라미터로 정의됨 (source: ${p.valueSource})`,
+              }));
+
+            // 값 예측기로 파라미터 값 예측 (Level 3 정확도 향상)
+            if (this.valuePredictor) {
+              predictedParams = this.valuePredictor.enhanceParameters(
+                predictedParams,
+                eventName,
+                pageTypeResult.pageType as ContentGroup,
+                config.url,
+                pageContext  // 추출된 페이지 컨텍스트 전달
+              );
+            }
+
+            predictedParameters.set(eventName, predictedParams);
+          }
+        }
+      }
+
       return {
         config,
         screenshotPath: screenshot.path,
@@ -268,6 +483,9 @@ export class ParallelContentGroupAnalyzer {
         pageTypeSignals: pageTypeResult.signals.map(s => s.detail),
         gtmPossibleEvents,
         startTime,
+        predictedParameters: predictedParameters.size > 0 ? predictedParameters : undefined,
+        specParameters: specParameters.size > 0 ? specParameters : undefined,
+        extractedContext,  // 추출된 컨텍스트 저장
       };
     } finally {
       await release();
@@ -446,6 +664,42 @@ export class ParallelContentGroupAnalyzer {
       const sessionOnceSkipped = predicted.filter(p => !ga4Actual.includes(p) && sessionOnceEvents.includes(p));
       const accuracy = correct.length / (correct.length + wrong.length) * 100 || 0;
 
+      // 파라미터 검증 (옵션 활성화 시)
+      let parameterValidation: ParallelAnalysisResult['parameterValidation'];
+      if (this.parameterValidator && pd.predictedParameters && pd.specParameters) {
+        const eventResults: ParameterValidationResult[] = [];
+
+        for (const eventName of predicted) {
+          const predictedParams = pd.predictedParameters.get(eventName) || [];
+          const specParams = pd.specParameters.get(eventName) || [];
+
+          // GA4 파라미터 캐시에서 컨텐츠 그룹별 실제 파라미터 가져오기
+          const cacheKey = `${pd.pageType}:${eventName}`;
+          const actualParams: GA4Parameter[] = this.ga4ParameterCache.get(cacheKey) || [];
+
+          const result = this.parameterValidator.validateEventParameters(
+            eventName,
+            pd.pageType as ContentGroup,
+            config.url,
+            predictedParams,
+            actualParams,
+            specParams
+          );
+          eventResults.push(result);
+        }
+
+        if (eventResults.length > 0) {
+          const aggregated = this.parameterValidator.aggregateResults(eventResults);
+          parameterValidation = {
+            eventResults,
+            avgKeyAccuracy: aggregated.summary.avgKeyAccuracy,
+            avgValueAccuracy: aggregated.summary.avgValueAccuracy,
+            overallScore: aggregated.summary.avgOverallScore,
+            feedback: aggregated.aggregatedFeedback
+          };
+        }
+      }
+
       return {
         contentGroup: config.contentGroup,
         url: config.url,
@@ -459,6 +713,7 @@ export class ParallelContentGroupAnalyzer {
         sessionOnceSkipped,
         accuracy,
         processingTimeMs: Date.now() - pd.startTime,
+        parameterValidation,
       };
     });
   }

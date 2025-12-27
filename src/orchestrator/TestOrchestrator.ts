@@ -321,6 +321,11 @@ export class TestOrchestrator {
       branchResult.screenshots.push(result.screenshotPath);
     }
 
+    // Vision AI 예측 결과가 있으면 저장 (기획자/마케터 관점 요소 분석 포함)
+    if (result.visionPrediction) {
+      branchResult.visionPrediction = result.visionPrediction;
+    }
+
     this.branchResults.set(task.branchId, branchResult);
   }
 
@@ -337,6 +342,12 @@ export class TestOrchestrator {
         result.endTime = new Date();
         result.durationMs = result.endTime.getTime() - result.startTime.getTime();
         this.branchResults.set(branchId, result);
+
+        // 이벤트별 상세 분석 출력
+        this.printEventAnalysis(result);
+
+        // 기획자/마케터 관점 요소 이상 분석 출력
+        this.printElementAnomalies(result);
       }
 
       this.progressTracker.branchCompleted(branchId, contentGroup);
@@ -391,12 +402,24 @@ export class TestOrchestrator {
   /**
    * Branch 정확도 계산
    * Vision AI 예측 vs GA4 실제 데이터 비교
+   *
+   * 정확도 계산 방식:
+   * - AUTO_FIRE: 실제로 발생해야 정확 (100% 또는 0%)
+   * - FORBIDDEN: 발생하지 않거나 노이즈(<1000건)여야 정확
+   * - CONDITIONAL: 실제 발생률에 따라 평가 (발생하면 정확, 미발생도 정확)
    */
   private calculateBranchAccuracy(branch: BranchTestResult): number {
     if (branch.events.length === 0) return 0;
 
     let correctPredictions = 0;
     let totalPredictions = 0;
+
+    // 전체 이벤트 수 계산 (비율 계산용)
+    let totalEventCount = 0;
+    for (const event of branch.events) {
+      const occurrenceParam = event.actualParams.find(p => p.name === '_event_occurred');
+      totalEventCount += occurrenceParam?.eventCount || 0;
+    }
 
     for (const event of branch.events) {
       // Vision AI 이벤트 발생 예측 확인
@@ -405,38 +428,150 @@ export class TestOrchestrator {
 
       // GA4 실제 이벤트 발생 여부 확인
       const occurrenceParam = event.actualParams.find(p => p.name === '_event_occurred');
-      const actualOccurred = occurrenceParam && occurrenceParam.eventCount && occurrenceParam.eventCount > 0;
+      const eventCount = occurrenceParam?.eventCount || 0;
+      const actualOccurred = eventCount > 0;
+      const eventRatio = totalEventCount > 0 ? (eventCount / totalEventCount) * 100 : 0;
 
-      // 예측이 있는 경우에만 정확도 계산
-      if (prediction) {
+      if (prediction === 'AUTO_FIRE') {
         totalPredictions++;
-
-        if (prediction === 'AUTO_FIRE') {
-          // 자동 발생 예측: 실제로 발생했으면 정확
-          if (actualOccurred) {
-            correctPredictions++;
-          }
-        } else if (prediction === 'FORBIDDEN') {
-          // 금지 예측: 발생하지 않았으면 정확 (또는 노이즈 수준만 발생)
-          const eventCount = occurrenceParam?.eventCount || 0;
-          // 1000건 이하는 노이즈로 간주
-          if (!actualOccurred || eventCount < 1000) {
-            correctPredictions++;
-          }
-        } else if (prediction === 'CONDITIONAL') {
-          // 조건부 예측: 발생해도 안해도 50% 정확도
-          correctPredictions += 0.5;
-        }
-      } else {
-        // 예측이 없는 경우: GA4에서 발생했으면 미탐으로 처리
+        // 자동 발생 예측: 실제로 발생했으면 정확
         if (actualOccurred) {
-          // 발생했지만 예측 못함 = 정확도에 영향 없음 (선택적)
-          // totalPredictions++; // 미탐을 카운트하려면 활성화
+          correctPredictions++;
         }
+      } else if (prediction === 'FORBIDDEN') {
+        totalPredictions++;
+        // 금지 예측: 발생하지 않았거나 노이즈 수준(<1000건)이면 정확
+        if (!actualOccurred || eventCount < 1000) {
+          correctPredictions++;
+        }
+      } else if (prediction === 'CONDITIONAL') {
+        totalPredictions++;
+        // 조건부 예측: 발생해도 정확, 미발생해도 정확 (조건에 따라 달라지므로)
+        correctPredictions++;
       }
     }
 
     return totalPredictions > 0 ? (correctPredictions / totalPredictions) * 100 : 0;
+  }
+
+  /**
+   * 이벤트별 상세 분석 출력
+   */
+  private printEventAnalysis(branch: BranchTestResult): void {
+    console.log(`\n📊 [${branch.contentGroup}] 이벤트별 상세 분석:`);
+    console.log('─'.repeat(70));
+    console.log('이벤트명'.padEnd(25) + '예측'.padEnd(15) + '발생건수'.padEnd(15) + '비율'.padEnd(10) + '결과');
+    console.log('─'.repeat(70));
+
+    // 전체 이벤트 수 계산
+    let totalEventCount = 0;
+    for (const event of branch.events) {
+      const occurrenceParam = event.actualParams.find(p => p.name === '_event_occurred');
+      totalEventCount += occurrenceParam?.eventCount || 0;
+    }
+
+    for (const event of branch.events) {
+      const predictionParam = event.predictedParams.find(p => p.name === '_event_prediction');
+      const prediction = predictionParam?.value as string || 'NONE';
+
+      const occurrenceParam = event.actualParams.find(p => p.name === '_event_occurred');
+      const eventCount = occurrenceParam?.eventCount || 0;
+      const ratio = totalEventCount > 0 ? (eventCount / totalEventCount) * 100 : 0;
+
+      let result = '';
+      let icon = '';
+
+      if (prediction === 'AUTO_FIRE') {
+        if (eventCount > 0) {
+          result = '✅ 정확';
+          icon = '🔥';
+        } else {
+          result = '❌ 미발생';
+          icon = '⚠️';
+        }
+      } else if (prediction === 'FORBIDDEN') {
+        if (eventCount === 0 || eventCount < 1000) {
+          result = '✅ 정확';
+          icon = '🚫';
+        } else {
+          result = `❌ 발생(${eventCount.toLocaleString()})`;
+          icon = '⚠️';
+        }
+      } else if (prediction === 'CONDITIONAL') {
+        if (eventCount > 0) {
+          result = `✅ 발생`;
+          icon = '⚡';
+        } else {
+          result = '➖ 미발생';
+          icon = '💤';
+        }
+      }
+
+      const eventName = event.eventName.padEnd(23);
+      const predStr = `${icon} ${prediction}`.padEnd(13);
+      const countStr = eventCount > 0 ? eventCount.toLocaleString().padStart(12) : '-'.padStart(12);
+      const ratioStr = ratio > 0 ? `${ratio.toFixed(2)}%`.padStart(8) : '-'.padStart(8);
+
+      console.log(`${eventName} ${predStr} ${countStr} ${ratioStr}  ${result}`);
+    }
+    console.log('─'.repeat(70));
+  }
+
+  /**
+   * 기획자/마케터 관점 요소 이상 분석 출력
+   */
+  private printElementAnomalies(branch: BranchTestResult): void {
+    // elementAnomalies가 visionPrediction에 포함되어 있는지 확인
+    if (!branch.visionPrediction?.elementAnomalies) {
+      return;
+    }
+
+    const anomalies = branch.visionPrediction.elementAnomalies;
+
+    // 누락된 요소가 있을 때만 출력
+    if (!anomalies.missingElements || anomalies.missingElements.length === 0) {
+      console.log(`\n✅ [${branch.contentGroup}] 모든 기대 요소가 정상적으로 발견됨`);
+      if (anomalies.presentElements && anomalies.presentElements.length > 0) {
+        console.log(`   발견된 요소: ${anomalies.presentElements.join(', ')}`);
+      }
+      return;
+    }
+
+    console.log(`\n⚠️ [${branch.contentGroup}] 기획자/마케터 관점 이상 분석:`);
+    console.log('═'.repeat(70));
+
+    // 심각도별 아이콘
+    const severityIcons: Record<string, string> = {
+      'CRITICAL': '🔴',
+      'HIGH': '🟠',
+      'MEDIUM': '🟡'
+    };
+
+    // 누락된 요소 출력
+    console.log(`\n📋 누락된 기대 요소 (${anomalies.missingElements.length}개):`);
+    console.log('─'.repeat(70));
+
+    for (const missing of anomalies.missingElements) {
+      const icon = severityIcons[missing.severity] || '⚪';
+      console.log(`\n${icon} [${missing.severity}] ${missing.element}`);
+      console.log(`   📌 이유: ${missing.reason}`);
+      if (missing.relatedEvent) {
+        console.log(`   🎯 관련 이벤트: ${missing.relatedEvent}`);
+      }
+      console.log(`   💼 비즈니스 영향: ${missing.businessImpact}`);
+      console.log(`   🔍 가능한 원인: ${missing.possibleCause}`);
+    }
+
+    // 발견된 요소 출력
+    if (anomalies.presentElements && anomalies.presentElements.length > 0) {
+      console.log(`\n✅ 발견된 기대 요소: ${anomalies.presentElements.join(', ')}`);
+    }
+
+    // 전반적 평가
+    const assessmentIcon = anomalies.overallAssessment === '정상' ? '✅' :
+                          anomalies.overallAssessment === '주의필요' ? '⚠️' : '🚨';
+    console.log(`\n${assessmentIcon} 전반적 평가: ${anomalies.overallAssessment}`);
+    console.log('═'.repeat(70));
   }
 
   /**

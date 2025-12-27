@@ -16,13 +16,16 @@
     ],
     "url_patterns": {
       "PRODUCT_DETAIL": ["/product/detail", "/ProductView", "/shop/item/", "/goods/", "product_no=", "onlineProdSn=", "onlineProdCode="],
-      "PRODUCT_LIST": ["/category/", "/brand/", "/shop/list", "/goods/catalog"],
+      "PRODUCT_LIST": ["/category/", "/shop/list", "/goods/catalog", "/display/category"],
       "SEARCH_RESULT": ["/search", "search.html", "keyword=", "query=", "q="],
       "CART": ["/cart", "/basket", "order/basket"],
       "ORDER": ["/order/", "/checkout/", "order.html"],
       "ORDER_COMPLETE": ["/order/complete", "/order/success", "order_complete"],
-      "EVENT_DETAIL": ["/event/", "/article/event/", "/promotion/"],
-      "BRAND_MAIN": ["/brand/", "/brandshop/"],
+      "EVENT_LIST": ["/display/event", "/event/list", "/events"],
+      "EVENT_DETAIL": ["/event/\\d+", "/article/event/\\d+", "/promotion/\\d+"],
+      "BRAND_MAIN": ["/display/brand", "/brandshop/"],
+      "LIVE_LIST": ["/display/live", "/live/list"],
+      "LIVE_DETAIL": ["/live/playerweb", "/live/detail", "/live/\\d+"],
       "MY": ["/mypage", "/my/", "/member/", "/login", "/consult/"],
       "OTHERS": ["/faq", "/notice", "/board/", "/article/faq/", "/help/", "/cs/", "/about/"]
     },
@@ -34,8 +37,11 @@
       "CART": "장바구니 상품 목록 + 수량 조절 + 총 금액 + 주문하기 버튼",
       "ORDER": "배송지 입력 폼 + 결제 수단 선택 + 결제 버튼",
       "ORDER_COMPLETE": "주문 완료 메시지 + 주문번호",
-      "EVENT_DETAIL": "이벤트 전용 페이지 (URL에 /event/, /article/event/ 포함)",
-      "BRAND_MAIN": "브랜드 로고 크게 + 브랜드 전용 상품 목록",
+      "EVENT_LIST": "이벤트/프로모션 목록 페이지 (여러 이벤트 배너/카드 나열, URL에 /display/event 포함)",
+      "EVENT_DETAIL": "단일 이벤트 상세 페이지 (URL에 이벤트ID 숫자 포함, 예: /event/32833)",
+      "BRAND_MAIN": "브랜드 로고 크게 + 브랜드 전용 상품 목록 (URL에 /display/brand 포함)",
+      "LIVE_LIST": "라이브 방송 목록 (여러 라이브 썸네일 나열, URL에 /display/live 포함)",
+      "LIVE_DETAIL": "라이브 방송 상세/재생 페이지 (URL에 /live/playerweb 또는 sy_id 포함)",
       "MY": "회원 정보 + 주문 내역/포인트/쿠폰 메뉴 + 로그인 페이지",
       "OTHERS": "FAQ, 공지사항, 고객센터, 회사소개 등 기타 페이지"
     }
@@ -171,24 +177,277 @@
       "SEARCH_RESULT": ["page_view", "view_search_results", "view_item_list"],
       "CART": ["page_view", "view_cart"],
       "ORDER": ["page_view", "begin_checkout"],
-      "ORDER_COMPLETE": ["page_view", "purchase"]
+      "ORDER_COMPLETE": ["page_view", "purchase"],
+      "EVENT_LIST": ["page_view"],
+      "EVENT_DETAIL": ["page_view"],
+      "BRAND_MAIN": ["page_view", "view_item_list"],
+      "LIVE_LIST": ["page_view"],
+      "LIVE_DETAIL": ["page_view"],
+      "MY": ["page_view"],
+      "OTHERS": ["page_view"]
     },
 
     "conditional": {
-      "view_promotion": "프로모션 배너가 뷰포트에 보일 때 (MAIN, PRODUCT_LIST)",
-      "view_item_list": "상품 목록이 보일 때 (MAIN에서 추천상품 섹션)"
+      "add_to_cart": "장바구니/바로구매 버튼이 보일 때 (PRODUCT_DETAIL)",
+      "begin_checkout": "바로구매 버튼이 보일 때 (PRODUCT_DETAIL, CART)",
+      "remove_from_cart": "장바구니 삭제 버튼이 보일 때 (CART)",
+      "select_item": "상품 카드 클릭 가능할 때 (PRODUCT_LIST, SEARCH_RESULT, BRAND_MAIN)",
+      "select_promotion": "프로모션 배너가 클릭 가능할 때 (MAIN, EVENT_LIST)",
+      "view_promotion": "프로모션 배너가 뷰포트에 보일 때 (MAIN, EVENT_LIST)",
+      "scroll": "스크롤 가능한 콘텐츠가 있을 때 - 트리거 조건: 스크롤 90% 이상",
+      "login": "로그인 버튼/폼이 보일 때 - 사용자 액션 필요",
+      "video_start": "동영상 플레이어가 보일 때 (LIVE_DETAIL)",
+      "view_item_list": "상품 목록이 보일 때 (MAIN 추천상품 섹션)"
     },
 
     "forbidden": {
       "MAIN": ["view_item", "add_to_cart", "purchase"],
       "PRODUCT_LIST": ["view_item", "purchase"],
       "CART": ["view_item", "purchase"],
-      "ORDER": ["view_item", "view_item_list"]
+      "ORDER": ["view_item", "view_item_list"],
+      "EVENT_LIST": ["view_item", "add_to_cart", "purchase", "view_cart", "begin_checkout"],
+      "EVENT_DETAIL": ["add_to_cart", "purchase", "view_cart", "begin_checkout"],
+      "BRAND_MAIN": ["view_item", "add_to_cart", "purchase"],
+      "LIVE_LIST": ["view_item", "add_to_cart", "purchase"],
+      "LIVE_DETAIL": ["add_to_cart", "purchase", "view_cart"]
+    }
+  },
+
+  "step4_expectedElements": {
+    "_meta": {
+      "purpose": "기획자/마케터 관점에서 페이지에 있어야 하는 요소들을 정의. 요소가 없으면 의심스러운 상황으로 플래깅",
+      "perspective": "웹사이트 기획자, 마케터, UX 디자이너 관점"
+    },
+
+    "instruction": "해당 페이지 타입에서 비즈니스적으로 반드시 있어야 하는 요소가 없으면 anomaly로 보고하세요",
+
+    "pageTypeExpectations": {
+      "PRODUCT_DETAIL": {
+        "description": "상품 상세 페이지 - 구매 전환이 가장 중요한 페이지",
+        "mustHaveElements": [
+          {
+            "element": "장바구니/담기 버튼",
+            "reason": "상품 상세에서 구매 퍼널 진입점. 없으면 전환 불가",
+            "relatedEvent": "add_to_cart",
+            "severity": "CRITICAL"
+          },
+          {
+            "element": "바로구매/구매하기 버튼",
+            "reason": "장바구니 스킵하고 바로 주문하는 사용자를 위한 퍼널",
+            "relatedEvent": "begin_checkout",
+            "severity": "HIGH"
+          },
+          {
+            "element": "상품 가격",
+            "reason": "가격 정보 없이 구매 결정 불가",
+            "relatedEvent": "view_item",
+            "severity": "CRITICAL"
+          },
+          {
+            "element": "상품명",
+            "reason": "상품 식별을 위한 필수 정보",
+            "relatedEvent": "view_item",
+            "severity": "CRITICAL"
+          },
+          {
+            "element": "브랜드명",
+            "reason": "브랜드 인지 및 상품 신뢰도",
+            "relatedEvent": "view_item",
+            "severity": "HIGH"
+          }
+        ],
+        "anomalyMessages": {
+          "missingCart": "장바구니 버튼이 없음 - 화면 기획에서 제외되었거나 숨겨져 있을 수 있음. 구매 전환 불가 상태",
+          "missingBuy": "바로구매 버튼이 없음 - 빠른 구매를 원하는 사용자의 전환 경로 부재",
+          "missingPrice": "가격 정보가 없음 - 상품 상세에서 가격 없이는 구매 결정 불가. 로딩 오류 또는 표시 오류 의심"
+        }
+      },
+
+      "PRODUCT_LIST": {
+        "description": "상품 목록/카테고리 페이지 - 상품 탐색과 선택이 중요",
+        "mustHaveElements": [
+          {
+            "element": "상품 카드 (썸네일 + 가격)",
+            "reason": "상품 목록 페이지의 핵심 콘텐츠",
+            "relatedEvent": "view_item_list",
+            "severity": "CRITICAL"
+          },
+          {
+            "element": "상품 클릭 영역",
+            "reason": "상품 상세로 이동하는 진입점",
+            "relatedEvent": "select_item",
+            "severity": "HIGH"
+          },
+          {
+            "element": "필터/정렬 옵션",
+            "reason": "많은 상품 중 원하는 상품을 찾기 위한 UX",
+            "relatedEvent": null,
+            "severity": "MEDIUM"
+          }
+        ],
+        "anomalyMessages": {
+          "noProducts": "상품이 표시되지 않음 - 카테고리가 비었거나 로딩 오류",
+          "noClickable": "상품 클릭 영역이 없음 - 상품 상세 진입 불가"
+        }
+      },
+
+      "SEARCH_RESULT": {
+        "description": "검색 결과 페이지 - 검색 의도에 맞는 결과 제공이 중요",
+        "mustHaveElements": [
+          {
+            "element": "검색어 표시",
+            "reason": "사용자가 검색한 내용 확인",
+            "relatedEvent": "view_search_results",
+            "severity": "HIGH"
+          },
+          {
+            "element": "검색 결과 개수",
+            "reason": "검색 결과 범위 파악",
+            "relatedEvent": "view_search_results",
+            "severity": "MEDIUM"
+          },
+          {
+            "element": "상품 목록 (결과 있는 경우)",
+            "reason": "검색 결과로 상품이 나와야 함",
+            "relatedEvent": "view_item_list",
+            "severity": "HIGH"
+          }
+        ],
+        "anomalyMessages": {
+          "noSearchTerm": "검색어가 표시되지 않음 - 사용자가 검색 컨텍스트 이해 불가"
+        }
+      },
+
+      "CART": {
+        "description": "장바구니 페이지 - 구매 완료를 위한 중간 단계",
+        "mustHaveElements": [
+          {
+            "element": "주문하기/결제하기 버튼",
+            "reason": "체크아웃 페이지로 이동하는 CTA",
+            "relatedEvent": "begin_checkout",
+            "severity": "CRITICAL"
+          },
+          {
+            "element": "상품 목록 (담긴 상품)",
+            "reason": "장바구니에 담긴 상품 확인",
+            "relatedEvent": "view_cart",
+            "severity": "CRITICAL"
+          },
+          {
+            "element": "수량 조절 UI",
+            "reason": "수량 변경을 위한 UX",
+            "relatedEvent": null,
+            "severity": "MEDIUM"
+          },
+          {
+            "element": "삭제 버튼",
+            "reason": "원하지 않는 상품 제거",
+            "relatedEvent": "remove_from_cart",
+            "severity": "MEDIUM"
+          }
+        ],
+        "anomalyMessages": {
+          "noCheckout": "주문/결제 버튼이 없음 - 구매 완료 불가. 심각한 UX 오류",
+          "emptyCart": "장바구니가 비어있음 - 정상 상태일 수 있으나 확인 필요"
+        }
+      },
+
+      "ORDER": {
+        "description": "주문서/체크아웃 페이지 - 결제 직전 단계",
+        "mustHaveElements": [
+          {
+            "element": "결제하기/구매완료 버튼",
+            "reason": "최종 결제 CTA. 없으면 구매 완료 불가",
+            "relatedEvent": "purchase",
+            "severity": "CRITICAL"
+          },
+          {
+            "element": "배송지 입력/선택 영역",
+            "reason": "배송 정보 필수",
+            "relatedEvent": null,
+            "severity": "CRITICAL"
+          },
+          {
+            "element": "결제 수단 선택",
+            "reason": "결제 방법 선택 필수",
+            "relatedEvent": null,
+            "severity": "CRITICAL"
+          },
+          {
+            "element": "주문 상품 요약",
+            "reason": "주문 내용 최종 확인",
+            "relatedEvent": null,
+            "severity": "HIGH"
+          }
+        ],
+        "anomalyMessages": {
+          "noPayButton": "결제 버튼이 없음 - 주문 완료 불가. 심각한 오류",
+          "noDelivery": "배송지 정보 영역이 없음 - 주문 프로세스 불완전"
+        }
+      },
+
+      "MAIN": {
+        "description": "메인/홈페이지 - 브랜드 노출과 탐색 시작점",
+        "mustHaveElements": [
+          {
+            "element": "메인 배너/히어로 영역",
+            "reason": "주요 프로모션, 캠페인 노출",
+            "relatedEvent": "view_promotion",
+            "severity": "HIGH"
+          },
+          {
+            "element": "상품 추천 섹션",
+            "reason": "상품 탐색 진입점 제공",
+            "relatedEvent": "view_item_list",
+            "severity": "MEDIUM"
+          },
+          {
+            "element": "GNB/메뉴",
+            "reason": "사이트 탐색을 위한 네비게이션",
+            "relatedEvent": null,
+            "severity": "HIGH"
+          }
+        ],
+        "anomalyMessages": {
+          "noBanner": "메인 배너가 없음 - 프로모션 노출 기회 손실",
+          "noProducts": "상품 추천이 없음 - 상품 탐색 진입 경로 부족"
+        }
+      },
+
+      "BRAND_MAIN": {
+        "description": "브랜드 메인 페이지 - 브랜드 경험과 상품 탐색",
+        "mustHaveElements": [
+          {
+            "element": "브랜드 상품 목록",
+            "reason": "브랜드 상품 탐색",
+            "relatedEvent": "view_item_list",
+            "severity": "HIGH"
+          },
+          {
+            "element": "브랜드 로고/아이덴티티",
+            "reason": "브랜드 인지",
+            "relatedEvent": null,
+            "severity": "MEDIUM"
+          }
+        ]
+      },
+
+      "EVENT_LIST": {
+        "description": "이벤트 목록 페이지 - 프로모션 탐색",
+        "mustHaveElements": [
+          {
+            "element": "이벤트 배너/카드 목록",
+            "reason": "진행 중인 이벤트 노출",
+            "relatedEvent": "view_promotion",
+            "severity": "HIGH"
+          }
+        ]
+      }
     }
   },
 
   "outputSchema": {
-    "pageType": "string (MAIN|PRODUCT_DETAIL|PRODUCT_LIST|SEARCH_RESULT|CART|ORDER|ORDER_COMPLETE|EVENT_DETAIL|BRAND_MAIN|MY)",
+    "pageType": "string (MAIN|PRODUCT_DETAIL|PRODUCT_LIST|SEARCH_RESULT|CART|ORDER|ORDER_COMPLETE|EVENT_LIST|EVENT_DETAIL|BRAND_MAIN|LIVE_LIST|LIVE_DETAIL|MY|OTHERS)",
     "confidence": "string (high|medium|low)",
     "variables": {
       "site_name": "string",
@@ -203,6 +462,21 @@
       "autoFire": ["string"],
       "conditional": ["string"],
       "forbidden": ["string"]
+    },
+    "elementAnomalies": {
+      "_description": "기획자/마케터 관점에서 있어야 하는데 없는 요소들",
+      "missingElements": [
+        {
+          "element": "string (누락된 요소명)",
+          "severity": "CRITICAL|HIGH|MEDIUM",
+          "reason": "string (왜 있어야 하는지)",
+          "relatedEvent": "string|null (관련 GA4 이벤트)",
+          "businessImpact": "string (비즈니스 영향 설명)",
+          "possibleCause": "string (가능한 원인 추정)"
+        }
+      ],
+      "presentElements": ["string (발견된 기대 요소들)"],
+      "overallAssessment": "string (전반적 평가)"
     },
     "reasoning": "string (판단 근거 간략 설명)"
   }

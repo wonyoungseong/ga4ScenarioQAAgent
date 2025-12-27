@@ -173,6 +173,8 @@ export const AMOREMALL_URL_PATTERNS: Record<string, string> = {
   'BRAND_MAIN': 'https://www.amoremall.com/kr/ko/display/brand',
   'EVENT_LIST': 'https://www.amoremall.com/kr/ko/display/event',
   'EVENT_DETAIL': 'https://www.amoremall.com/kr/ko/display/event',
+  'LIVE_LIST': 'https://www.amoremall.com/kr/ko/display/live',
+  'LIVE_DETAIL': 'https://www.amoremall.com/kr/ko/display/live/player?sy_id=691d716b1ccf98049b711174',
 };
 
 /**

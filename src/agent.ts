@@ -8,6 +8,7 @@ import { SpecLoader, LoadedSpecs, EventSpec } from './loaders/specLoader';
 import { ScenarioGenerator, ScenarioGeneratorInput } from './generators/scenarioGenerator';
 import { EventScenario } from './types/scenario';
 import { initializeJourneyRegistry, journeyRegistry } from './config/journeyRegistry';
+import { PageType, detectPageTypeFromUrl } from './types/pageContext';
 
 export interface ParameterValidation {
   requiredParams: Array<{name: string; devVar: string; description: string}>;
@@ -41,6 +42,7 @@ export class ScenarioAgent {
   private specsDir: string;
   private gtmPath: string | null = null;
   private currentSiteId: string | null = null;
+  private propertyId: string | null = null;
 
   constructor(options: {
     outputDir?: string;
@@ -49,13 +51,15 @@ export class ScenarioAgent {
     geminiApiKey?: string;
     gtmJsonPath?: string;  // GTM JSON 파일 경로
     siteId?: string;  // 사이트 ID (예: "amorepacific_GTM-5FK5X5C4")
+    propertyId?: string;  // GA4 Property ID (파라미터 값 예측용)
   } = {}) {
     this.outputDir = options.outputDir || './output';
     this.guidesDir = options.guidesDir || './guides';
     this.specsDir = options.specsDir || './specs';
+    this.propertyId = options.propertyId || null;
     this.pageAnalyzer = new PageAnalyzer();
     this.specLoader = new SpecLoader(this.specsDir);
-    this.scenarioGenerator = new ScenarioGenerator(this.specLoader);
+    this.scenarioGenerator = new ScenarioGenerator(this.specLoader, this.propertyId || undefined);
 
     // 사이트 ID 저장
     if (options.siteId) {
@@ -307,6 +311,11 @@ export class ScenarioAgent {
 
       // 구조화된 시나리오 생성 (Crawler/Validation Agent용)
       console.log('\n📋 구조화된 시나리오 생성 중...');
+
+      // 페이지 타입 감지 (파라미터 값 예측용)
+      const detectedPageType = detectPageTypeFromUrl(url);
+      console.log(`   📍 감지된 페이지 타입: ${detectedPageType}`);
+
       const scenarioInput: ScenarioGeneratorInput = {
         pageUrl: url,
         eventName,
@@ -316,7 +325,9 @@ export class ScenarioAgent {
         gtmTriggers: gtmTriggerObjects.length > 0 ? gtmTriggerObjects : undefined,
         matchedElements: matchedElements.length > 0 ? matchedElements : undefined,
         eventSpec,
-        dataLayerEventName: parameterValidation?.dataLayerEvent
+        dataLayerEventName: parameterValidation?.dataLayerEvent,
+        pageType: detectedPageType,
+        propertyId: this.propertyId || undefined
       };
 
       const scenario = this.scenarioGenerator.generate(scenarioInput);

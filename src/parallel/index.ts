@@ -19,3 +19,10 @@ export {
   ParallelAnalysisResult,
   ContentGroupConfig,
 } from './parallelContentGroupAnalyzer';
+export {
+  ParameterValidator,
+  ParameterValidationResult,
+  AggregatedValidationResult,
+  ValidationLevel,
+  PromptFeedback,
+} from './parameterValidator';

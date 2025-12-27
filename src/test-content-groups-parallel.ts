@@ -4,6 +4,7 @@
  * 기존 test-content-groups.ts의 병렬 처리 버전
  * - 브라우저 풀링으로 페이지 캡처 병렬화
  * - Vision AI 배치 처리
+ * - Level 2/3 파라미터 검증 (키 + 값)
  * - 약 70% 시간 단축 목표
  */
 import * as dotenv from 'dotenv';
@@ -13,6 +14,7 @@ import {
   ContentGroupConfig,
   ParallelAnalysisResult,
 } from './parallel';
+import { ValidationLevel } from './parallel/parameterValidator';
 
 dotenv.config();
 
@@ -161,20 +163,47 @@ function printResults(results: ParallelAnalysisResult[]): void {
   console.log('═'.repeat(70));
 
   console.log('\n컨텐츠 그룹별 정확도:\n');
-  console.log('┌────────────────────┬────────────────┬────────────┬────────────┬──────────┐');
-  console.log('│ 컨텐츠 그룹        │ 페이지 타입    │ 정확 예측  │ 누락       │ 정확도   │');
-  console.log('├────────────────────┼────────────────┼────────────┼────────────┼──────────┤');
+  // 파라미터 검증이 활성화된 결과가 있는지 확인
+  const hasParamValidation = results.some(r => r.parameterValidation);
 
-  for (const r of results) {
-    const cg = r.contentGroup.padEnd(18);
-    const pt = r.pageType.padEnd(14);
-    const correct = String(r.correct.length).padEnd(10);
-    const missed = String(r.missed.length).padEnd(10);
-    const acc = `${r.accuracy.toFixed(1)}%`.padEnd(8);
-    console.log(`│ ${cg} │ ${pt} │ ${correct} │ ${missed} │ ${acc} │`);
+  if (hasParamValidation) {
+    console.log('┌────────────────────┬────────────────┬────────────┬──────────┬──────────┬──────────┐');
+    console.log('│ 컨텐츠 그룹        │ 페이지 타입    │ 이벤트정확 │ 키정확도 │ 값정확도 │ 종합점수 │');
+    console.log('├────────────────────┼────────────────┼────────────┼──────────┼──────────┼──────────┤');
+
+    for (const r of results) {
+      const cg = r.contentGroup.padEnd(18);
+      const pt = r.pageType.padEnd(14);
+      const eventAcc = `${r.accuracy.toFixed(1)}%`.padEnd(10);
+      const keyAcc = r.parameterValidation
+        ? `${r.parameterValidation.avgKeyAccuracy.toFixed(1)}%`.padEnd(8)
+        : 'N/A'.padEnd(8);
+      const valAcc = r.parameterValidation
+        ? `${r.parameterValidation.avgValueAccuracy.toFixed(1)}%`.padEnd(8)
+        : 'N/A'.padEnd(8);
+      const overall = r.parameterValidation
+        ? `${r.parameterValidation.overallScore.toFixed(1)}%`.padEnd(8)
+        : 'N/A'.padEnd(8);
+      console.log(`│ ${cg} │ ${pt} │ ${eventAcc} │ ${keyAcc} │ ${valAcc} │ ${overall} │`);
+    }
+
+    console.log('└────────────────────┴────────────────┴────────────┴──────────┴──────────┴──────────┘');
+  } else {
+    console.log('┌────────────────────┬────────────────┬────────────┬────────────┬──────────┐');
+    console.log('│ 컨텐츠 그룹        │ 페이지 타입    │ 정확 예측  │ 누락       │ 정확도   │');
+    console.log('├────────────────────┼────────────────┼────────────┼────────────┼──────────┤');
+
+    for (const r of results) {
+      const cg = r.contentGroup.padEnd(18);
+      const pt = r.pageType.padEnd(14);
+      const correct = String(r.correct.length).padEnd(10);
+      const missed = String(r.missed.length).padEnd(10);
+      const acc = `${r.accuracy.toFixed(1)}%`.padEnd(8);
+      console.log(`│ ${cg} │ ${pt} │ ${correct} │ ${missed} │ ${acc} │`);
+    }
+
+    console.log('└────────────────────┴────────────────┴────────────┴────────────┴──────────┘');
   }
-
-  console.log('└────────────────────┴────────────────┴────────────┴────────────┴──────────┘');
 
   // 전체 정확도 계산
   const totalCorrect = results.reduce((sum, r) => sum + r.correct.length, 0);
@@ -182,7 +211,38 @@ function printResults(results: ParallelAnalysisResult[]): void {
   const totalWrong = results.reduce((sum, r) => sum + r.wrong.length, 0);
   const overallAccuracy = totalCorrect / (totalCorrect + totalWrong) * 100 || 0;
 
-  console.log(`\n📈 전체 정확도: ${overallAccuracy.toFixed(1)}% (${totalCorrect}개 정확 / ${totalPredicted}개 예측)\n`);
+  console.log(`\n📈 전체 이벤트 정확도: ${overallAccuracy.toFixed(1)}% (${totalCorrect}개 정확 / ${totalPredicted}개 예측)`);
+
+  // 파라미터 검증 요약 (활성화된 경우)
+  if (hasParamValidation) {
+    const validResults = results.filter(r => r.parameterValidation);
+    if (validResults.length > 0) {
+      const avgKeyAcc = validResults.reduce((sum, r) => sum + (r.parameterValidation?.avgKeyAccuracy || 0), 0) / validResults.length;
+      const avgValAcc = validResults.reduce((sum, r) => sum + (r.parameterValidation?.avgValueAccuracy || 0), 0) / validResults.length;
+      const avgOverall = validResults.reduce((sum, r) => sum + (r.parameterValidation?.overallScore || 0), 0) / validResults.length;
+
+      console.log(`\n📊 파라미터 검증 결과:`);
+      console.log(`   - 평균 키 정확도 (Level 2): ${avgKeyAcc.toFixed(1)}%`);
+      console.log(`   - 평균 값 정확도 (Level 3): ${avgValAcc.toFixed(1)}%`);
+      console.log(`   - 종합 점수: ${avgOverall.toFixed(1)}%`);
+
+      // 주요 피드백 출력
+      const allFeedback = validResults.flatMap(r => r.parameterValidation?.feedback || []);
+      const criticalFeedback = allFeedback.filter(f => f.priority === 'critical');
+      const highFeedback = allFeedback.filter(f => f.priority === 'high');
+
+      if (criticalFeedback.length > 0 || highFeedback.length > 0) {
+        console.log(`\n🚨 시스템 프롬프트 업데이트 필요:`);
+        for (const fb of criticalFeedback.slice(0, 3)) {
+          console.log(`   [CRITICAL] ${fb.parameterName}: ${fb.suggestedFix}`);
+        }
+        for (const fb of highFeedback.slice(0, 3)) {
+          console.log(`   [HIGH] ${fb.parameterName}: ${fb.suggestedFix}`);
+        }
+      }
+    }
+  }
+  console.log('');
 
   // 누락 이벤트 분석
   const missedCounts = new Map<string, number>();
@@ -241,6 +301,34 @@ function saveResults(results: ParallelAnalysisResult[]): void {
     }
   }
 
+  // 파라미터 검증 결과 집계
+  const hasParamValidation = results.some(r => r.parameterValidation);
+  let paramValidationSummary: any = null;
+
+  if (hasParamValidation) {
+    const validResults = results.filter(r => r.parameterValidation);
+    const avgKeyAcc = validResults.reduce((sum, r) => sum + (r.parameterValidation?.avgKeyAccuracy || 0), 0) / validResults.length;
+    const avgValAcc = validResults.reduce((sum, r) => sum + (r.parameterValidation?.avgValueAccuracy || 0), 0) / validResults.length;
+    const avgOverall = validResults.reduce((sum, r) => sum + (r.parameterValidation?.overallScore || 0), 0) / validResults.length;
+    const allFeedback = validResults.flatMap(r => r.parameterValidation?.feedback || []);
+
+    paramValidationSummary = {
+      avgKeyAccuracy: avgKeyAcc,
+      avgValueAccuracy: avgValAcc,
+      avgOverallScore: avgOverall,
+      feedbackCount: allFeedback.length,
+      criticalCount: allFeedback.filter(f => f.priority === 'critical').length,
+      highCount: allFeedback.filter(f => f.priority === 'high').length,
+    };
+
+    // 피드백 마크다운 파일 저장
+    if (allFeedback.length > 0) {
+      const feedbackMd = generateFeedbackMarkdown(validResults, allFeedback);
+      fs.writeFileSync('./output/parameter_validation_feedback.md', feedbackMd);
+      console.log('📝 피드백 저장됨: ./output/parameter_validation_feedback.md');
+    }
+  }
+
   const output = {
     timestamp: new Date().toISOString(),
     mode: 'parallel',
@@ -256,6 +344,12 @@ function saveResults(results: ParallelAnalysisResult[]): void {
       sessionOnceSkipped: r.sessionOnceSkipped,
       accuracy: r.accuracy,
       processingTimeMs: r.processingTimeMs,
+      parameterValidation: r.parameterValidation ? {
+        avgKeyAccuracy: r.parameterValidation.avgKeyAccuracy,
+        avgValueAccuracy: r.parameterValidation.avgValueAccuracy,
+        overallScore: r.parameterValidation.overallScore,
+        feedbackCount: r.parameterValidation.feedback.length,
+      } : undefined,
     })),
     summary: {
       totalContentGroups: results.length,
@@ -263,6 +357,7 @@ function saveResults(results: ParallelAnalysisResult[]): void {
       totalCorrect,
       totalWrong,
       missedEventCounts: missedCounts,
+      parameterValidation: paramValidationSummary,
     },
   };
 
@@ -271,6 +366,66 @@ function saveResults(results: ParallelAnalysisResult[]): void {
     JSON.stringify(output, null, 2)
   );
   console.log('\n✅ 결과 저장됨: ./output/content_group_prediction_results_parallel.json');
+}
+
+/**
+ * 피드백 마크다운 생성
+ */
+function generateFeedbackMarkdown(results: ParallelAnalysisResult[], allFeedback: any[]): string {
+  const lines: string[] = [];
+
+  lines.push('# 파라미터 검증 피드백 보고서\n');
+  lines.push(`생성 시간: ${new Date().toISOString()}\n`);
+
+  // 요약
+  const validResults = results.filter(r => r.parameterValidation);
+  const avgKeyAcc = validResults.reduce((sum, r) => sum + (r.parameterValidation?.avgKeyAccuracy || 0), 0) / validResults.length;
+  const avgValAcc = validResults.reduce((sum, r) => sum + (r.parameterValidation?.avgValueAccuracy || 0), 0) / validResults.length;
+  const avgOverall = validResults.reduce((sum, r) => sum + (r.parameterValidation?.overallScore || 0), 0) / validResults.length;
+
+  lines.push('## 요약\n');
+  lines.push(`- **평균 키 정확도 (Level 2)**: ${avgKeyAcc.toFixed(1)}%`);
+  lines.push(`- **평균 값 정확도 (Level 3)**: ${avgValAcc.toFixed(1)}%`);
+  lines.push(`- **종합 점수**: ${avgOverall.toFixed(1)}%\n`);
+
+  // Critical 이슈
+  const criticalFeedback = allFeedback.filter(f => f.priority === 'critical');
+  if (criticalFeedback.length > 0) {
+    lines.push('## 🚨 Critical 이슈 (즉시 수정 필요)\n');
+    for (const fb of criticalFeedback) {
+      lines.push(`### ${fb.parameterName || fb.eventName}`);
+      lines.push(`- **타입**: ${fb.type}`);
+      lines.push(`- **대상**: ${fb.target}`);
+      lines.push(`- **현재**: ${fb.currentBehavior}`);
+      lines.push(`- **예상**: ${fb.expectedBehavior}`);
+      lines.push(`- **수정 제안**: ${fb.suggestedFix}\n`);
+    }
+  }
+
+  // High 우선순위 이슈
+  const highFeedback = allFeedback.filter(f => f.priority === 'high');
+  if (highFeedback.length > 0) {
+    lines.push('## ⚠️ High 우선순위 이슈\n');
+    lines.push('| 파라미터 | 이벤트 | 타입 | 수정 제안 |');
+    lines.push('|----------|--------|------|-----------|');
+    for (const fb of highFeedback.slice(0, 20)) {
+      lines.push(`| ${fb.parameterName || '-'} | ${fb.eventName || '-'} | ${fb.type} | ${fb.suggestedFix} |`);
+    }
+    lines.push('');
+  }
+
+  // 컨텐츠 그룹별 상세
+  lines.push('## 컨텐츠 그룹별 상세\n');
+  for (const r of validResults) {
+    if (r.parameterValidation) {
+      lines.push(`### ${r.contentGroup} (${r.pageType})`);
+      lines.push(`- 키 정확도: ${r.parameterValidation.avgKeyAccuracy.toFixed(1)}%`);
+      lines.push(`- 값 정확도: ${r.parameterValidation.avgValueAccuracy.toFixed(1)}%`);
+      lines.push(`- 피드백 수: ${r.parameterValidation.feedback.length}개\n`);
+    }
+  }
+
+  return lines.join('\n');
 }
 
 async function main() {
@@ -286,6 +441,11 @@ async function main() {
 
   const startTime = Date.now();
 
+  // 파라미터 검증 활성화 여부 (환경변수로 제어, 기본값 true)
+  const enableParamValidation = process.env.ENABLE_PARAM_VALIDATION !== 'false';
+  const enableGA4Collection = process.env.ENABLE_GA4_COLLECTION !== 'false';
+  const enableAutoLearning = process.env.ENABLE_AUTO_LEARNING === 'true';
+
   // 병렬 분석기 생성 및 초기화
   const analyzer = new ParallelContentGroupAnalyzer(apiKey, {
     maxBrowserConcurrency: 4,
@@ -293,7 +453,21 @@ async function main() {
     skipVision: false,  // true로 변경하면 Vision AI 스킵 (빠른 테스트)
     pageWaitTime: 3000,
     ga4PropertyId: GA4_PROPERTY_ID,  // Edge Case 적용
+    enableParameterValidation: enableParamValidation,  // Level 2/3 파라미터 검증
+    validationLevel: ValidationLevel.LEVEL3_PARAM_VALUES,
+    enableGA4ParameterCollection: enableGA4Collection,  // GA4에서 실제 파라미터 값 수집
+    enableAutoLearning: enableAutoLearning,  // 자동 학습 및 설정 업데이트
   });
+
+  if (enableParamValidation) {
+    console.log('🔬 파라미터 검증: Level 3 (키 + 값) 활성화');
+  }
+  if (enableGA4Collection) {
+    console.log('📊 GA4 파라미터 수집: 활성화');
+  }
+  if (enableAutoLearning) {
+    console.log('🧠 자동 학습: 활성화');
+  }
 
   console.log(`🔧 GA4 Property ID: ${GA4_PROPERTY_ID}`);
 

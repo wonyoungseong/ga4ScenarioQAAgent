@@ -185,6 +185,22 @@ export interface TaskResult {
 
   /** 메타데이터 */
   metadata?: Record<string, any>;
+
+  /** Vision AI 예측 결과 (기획자/마케터 관점 요소 분석 포함) */
+  visionPrediction?: {
+    elementAnomalies?: {
+      missingElements: Array<{
+        element: string;
+        severity: 'CRITICAL' | 'HIGH' | 'MEDIUM';
+        reason: string;
+        relatedEvent: string | null;
+        businessImpact: string;
+        possibleCause: string;
+      }>;
+      presentElements: string[];
+      overallAssessment: '정상' | '주의필요' | '심각';
+    };
+  };
 }
 
 /**

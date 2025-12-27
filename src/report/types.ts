@@ -98,7 +98,7 @@ export const DEFAULT_MARKDOWN_OPTIONS: MarkdownOptions = {
 export const DEFAULT_JSON_OPTIONS: JsonOptions = {
   prettyPrint: true,
   includeMetadata: true,
-  includeRawData: false
+  includeRawData: true  // 파라미터 값 포함
 };
 
 export const DEFAULT_HTML_OPTIONS: HtmlOptions = {

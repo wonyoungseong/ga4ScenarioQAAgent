@@ -49,8 +49,10 @@ import { VisionAnalysisResult, VisionScenario, ExtractedVisualContent, ExpectedD
 import { MatchedElement } from '../analyzers/pageAnalyzer';
 import { GTMTrigger } from '../analyzers/gtmAnalyzer';
 import { SpecLoader, EventSpec } from '../loaders/specLoader';
+import { ParameterValuePredictor } from '../learning/parameterValuePredictor';
+import { PageType } from '../types/pageContext';
 
-const AGENT_VERSION = '2.4.0';
+const AGENT_VERSION = '2.5.0';  // v2.5.0: ParameterValuePredictor 통합
 
 /** 트리거 타입 -> 발생 방식 매핑 */
 const TRIGGER_TYPE_TO_FIRING_METHOD: Record<string, 'click' | 'impression' | 'dataLayer' | 'page' | 'scroll' | 'form'> = {
@@ -109,16 +111,40 @@ export interface ScenarioGeneratorInput {
 
   /** dataLayer 이벤트명 */
   dataLayerEventName?: string;
+
+  /** 페이지 타입 (파라미터 값 예측용) */
+  pageType?: PageType;
+
+  /** GA4 Property ID (파라미터 값 예측용) */
+  propertyId?: string;
 }
 
 export class ScenarioGenerator {
   private specLoader: SpecLoader | null;
   private sessionId: string;
+  private valuePredictor: ParameterValuePredictor | null = null;
+  private propertyId: string | null = null;
 
-  constructor(specLoader?: SpecLoader) {
+  constructor(specLoader?: SpecLoader, propertyId?: string) {
     this.specLoader = specLoader || null;
     // 세션 ID는 시나리오 생성 시점의 timestamp 기반
     this.sessionId = `sess_${Date.now()}`;
+
+    // ParameterValuePredictor 초기화 (propertyId가 있는 경우)
+    if (propertyId) {
+      this.propertyId = propertyId;
+      this.valuePredictor = new ParameterValuePredictor(propertyId);
+    }
+  }
+
+  /**
+   * PropertyId 설정 및 ValuePredictor 초기화
+   */
+  setPropertyId(propertyId: string): void {
+    if (this.propertyId !== propertyId) {
+      this.propertyId = propertyId;
+      this.valuePredictor = new ParameterValuePredictor(propertyId);
+    }
   }
 
   /**
@@ -246,7 +272,8 @@ export class ScenarioGenerator {
       gtmTriggers,
       matchedElements,
       eventSpec,
-      dataLayerEventName
+      dataLayerEventName,
+      pageType
     } = input;
 
     // Whitelist 경계 정의
@@ -265,8 +292,13 @@ export class ScenarioGenerator {
       visionAnalysis.shouldNotFire
     );
 
-    // 파라미터 검증 규칙 생성
-    const parameterValidation = this.createParameterValidation(eventSpec);
+    // 파라미터 검증 규칙 생성 (값 예측 포함)
+    const parameterValidation = this.createParameterValidation(
+      eventName,
+      pageType,
+      pageUrl,
+      eventSpec
+    );
 
     // False Positive 감지 규칙 생성
     const falsePositiveRules = this.createFalsePositiveRules(
@@ -542,9 +574,12 @@ export class ScenarioGenerator {
   }
 
   /**
-   * 파라미터 검증 규칙 생성
+   * 파라미터 검증 규칙 생성 (값 예측 포함)
    */
   private createParameterValidation(
+    eventName: string,
+    pageType: PageType | undefined,
+    pageUrl: string,
     eventSpec?: EventSpec
   ): { eventParams: ParamValidationRule[]; itemParams?: ItemParamValidationRule[] } {
     const eventParams: ParamValidationRule[] = [];
@@ -556,6 +591,14 @@ export class ScenarioGenerator {
 
     // EventSpec.parameters는 EventParameter[] 타입
     for (const param of eventSpec.parameters) {
+      // 값 예측 생성
+      const valuePrediction = this.predictParameterValue(
+        eventName,
+        param.ga4_param,
+        pageType,
+        pageUrl
+      );
+
       eventParams.push({
         name: param.ga4_param,
         required: param.required,
@@ -563,6 +606,7 @@ export class ScenarioGenerator {
         devGuideVariable: param.dev_guide_var,
         gtmVariable: param.gtm_variable,
         validation: param.validation ? { pattern: param.validation } : undefined,
+        valuePrediction,
         description: param.description
       });
     }
@@ -584,6 +628,79 @@ export class ScenarioGenerator {
     }
 
     return { eventParams, itemParams: itemParams.length > 0 ? itemParams : undefined };
+  }
+
+  /**
+   * 파라미터 값 예측 생성
+   *
+   * ParameterValuePredictor를 사용하여 파라미터 값을 예측합니다.
+   * Level 3 정확도 향상을 위한 핵심 로직입니다.
+   */
+  private predictParameterValue(
+    eventName: string,
+    paramName: string,
+    pageType: PageType | undefined,
+    pageUrl: string
+  ): ParamValidationRule['valuePrediction'] {
+    // 값 유형 분류 (static method 사용)
+    const valueType = ParameterValuePredictor.classifyParameterType(eventName, paramName);
+
+    // DYNAMIC 파라미터는 값 예측 불가 (존재 여부만 확인)
+    if (valueType === 'DYNAMIC') {
+      return {
+        predictedValue: null,
+        valueType: 'DYNAMIC',
+        confidence: 0,
+        source: undefined,
+        shouldReportMismatch: false  // DYNAMIC은 불일치 리포팅 안 함
+      };
+    }
+
+    // ValuePredictor가 없으면 기본값 반환
+    if (!this.valuePredictor) {
+      return {
+        predictedValue: null,
+        valueType,
+        confidence: 50,
+        shouldReportMismatch: valueType === 'VERIFIABLE'
+      };
+    }
+
+    // VERIFIABLE/CONTENT_GROUP 파라미터 값 예측
+    const contentGroup = pageType || 'UNKNOWN';
+
+    // 전체 파라미터 예측 후 해당 파라미터 찾기
+    const predictions = this.valuePredictor.predictParameterValues(
+      eventName,
+      contentGroup as any,
+      pageUrl
+    );
+
+    const prediction = predictions.find(p => p.name === paramName);
+
+    if (prediction) {
+      // confidence 문자열을 숫자로 변환
+      const confidenceMap: Record<string, number> = {
+        'high': 90,
+        'medium': 70,
+        'low': 50
+      };
+
+      return {
+        predictedValue: prediction.value,
+        valueType,
+        confidence: confidenceMap[prediction.confidence] || 50,
+        source: prediction.source as any,
+        shouldReportMismatch: valueType === 'VERIFIABLE'
+      };
+    }
+
+    return {
+      predictedValue: null,
+      valueType,
+      confidence: 50,
+      shouldReportMismatch: valueType === 'VERIFIABLE'
+    };
   }
 
   /**

@@ -55,6 +55,19 @@ export interface VisionPredictionResult {
   conditionalEvents: string[];
   /** 발생 금지 이벤트 */
   forbiddenEvents: string[];
+  /** 기획자/마케터 관점 요소 이상 분석 */
+  elementAnomalies?: {
+    missingElements: Array<{
+      element: string;
+      severity: 'CRITICAL' | 'HIGH' | 'MEDIUM';
+      reason: string;
+      relatedEvent: string | null;
+      businessImpact: string;
+      possibleCause: string;
+    }>;
+    presentElements: string[];
+    overallAssessment: '정상' | '주의필요' | '심각';
+  };
 }
 
 export class AgentWorker {
@@ -125,16 +138,27 @@ export class AgentWorker {
         }
       }
 
+      // LIVE 페이지는 networkidle 사용 (더 완전한 로딩 대기)
+      const isLivePage = ['LIVE_LIST', 'LIVE_DETAIL'].includes(task.contentGroup);
       await page.goto(targetUrl, {
-        waitUntil: 'domcontentloaded',  // networkidle 대신 domcontentloaded 사용 (더 빠름)
+        waitUntil: isLivePage ? 'networkidle' : 'domcontentloaded',
         timeout: this.config.pageLoadTimeout
       });
 
       // 팝업 닫기 시도
       await this.closePopups(page);
 
+      // 페이지 타입별 동적 콘텐츠 대기 시간 설정
+      const isDynamicContentPage = ['LIVE_LIST', 'LIVE_DETAIL', 'MAIN'].includes(task.contentGroup);
+      const baseWaitTime = isDynamicContentPage ? 3000 : 2000;
+
       // 추가 대기 (동적 컨텐츠 로딩)
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(baseWaitTime);
+
+      // LIVE 페이지는 스크롤 기반 Lazy Loading 트리거 및 추가 대기
+      if (isLivePage) {
+        await this.triggerLazyLoadingForLivePage(page, task.contentGroup);
+      }
 
       // 2. 404 체크
       const is404 = await this.check404(page);
@@ -150,20 +174,30 @@ export class AgentWorker {
       // 3. 스크린샷 캡처
       const screenshotPath = await this.captureScreenshot(page, task);
 
-      // 4. 데이터 수집
-      const eventData = await this.collectEventData(
+      // 4. 데이터 수집 (Vision AI 예측 포함)
+      const { events: eventData, visionResult } = await this.collectEventData(
         task,
         page,
         screenshotPath
       );
 
-      return {
+      // TaskResult 생성 (기획자/마케터 관점 요소 분석 포함)
+      const taskResult: TaskResult = {
         taskId: task.taskId,
         success: true,
         durationMs: Date.now() - startTime,
         data: eventData,
         screenshotPath
       };
+
+      // Vision AI 예측 결과가 있으면 elementAnomalies 추가
+      if (visionResult?.elementAnomalies) {
+        taskResult.visionPrediction = {
+          elementAnomalies: visionResult.elementAnomalies
+        };
+      }
+
+      return taskResult;
 
     } catch (error: any) {
       return {
@@ -207,6 +241,86 @@ export class AgentWorker {
       }
     } catch {
       // 팝업 닫기 실패해도 계속 진행
+    }
+  }
+
+  /**
+   * LIVE 페이지 Lazy Loading 트리거
+   * 스크롤 기반 콘텐츠 로딩 및 동적 요소 대기
+   */
+  private async triggerLazyLoadingForLivePage(page: Page, contentGroup: string): Promise<void> {
+    console.log(`[${contentGroup}] Lazy Loading 트리거 시작...`);
+
+    try {
+      // 1. 페이지 높이 및 콘텐츠 확인
+      const pageInfo = await page.evaluate(() => {
+        return {
+          scrollHeight: document.body.scrollHeight,
+          clientHeight: document.documentElement.clientHeight,
+          hasVideos: document.querySelectorAll('video, [class*="video"], [class*="shorts"], [class*="play"]').length,
+          hasImages: document.querySelectorAll('img[src*="live"], img[src*="thumb"]').length,
+          hasLiveElements: document.querySelectorAll('[class*="live"], [class*="highlight"]').length
+        };
+      });
+
+      console.log(`[${contentGroup}] 초기 상태:`, pageInfo);
+
+      // 2. 콘텐츠가 없으면 스크롤하여 Lazy Loading 트리거
+      if (pageInfo.hasVideos === 0 && pageInfo.hasImages === 0 && pageInfo.hasLiveElements === 0) {
+        console.log(`[${contentGroup}] 콘텐츠 미감지 - 스크롤 트리거 시작`);
+
+        // 점진적 스크롤 (Lazy Loading 트리거)
+        for (let i = 0; i < 3; i++) {
+          await page.evaluate((step) => {
+            window.scrollTo(0, window.innerHeight * (step + 1) * 0.3);
+          }, i);
+          await page.waitForTimeout(1000);
+        }
+
+        // 다시 맨 위로 스크롤
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await page.waitForTimeout(2000);
+      }
+
+      // 3. 특정 LIVE 관련 셀렉터 대기 (아모레몰 전용)
+      const liveSelectors = [
+        '[class*="shortplay"]',       // 숏플레이 영역
+        '[class*="highlight"]',       // 하이라이트 영역
+        '[class*="live-card"]',       // 라이브 카드
+        '[class*="video-thumb"]',     // 영상 썸네일
+        'img[alt*="라이브"]',          // 라이브 이미지
+        '[class*="shorts"]',          // 숏츠
+        '.swiper-slide img'           // 스와이퍼 슬라이드 이미지
+      ];
+
+      for (const selector of liveSelectors) {
+        try {
+          const el = await page.waitForSelector(selector, { timeout: 3000 });
+          if (el) {
+            console.log(`[${contentGroup}] 셀렉터 발견: ${selector}`);
+            break;
+          }
+        } catch {
+          // 해당 셀렉터 없음, 다음으로
+        }
+      }
+
+      // 4. 최종 상태 확인
+      const finalState = await page.evaluate(() => {
+        return {
+          hasVideos: document.querySelectorAll('video, [class*="video"]').length,
+          hasImages: document.querySelectorAll('img').length,
+          bodyText: document.body.innerText.substring(0, 500)
+        };
+      });
+
+      console.log(`[${contentGroup}] 최종 상태: videos=${finalState.hasVideos}, images=${finalState.hasImages}`);
+
+      // 5. 추가 대기 (렌더링 완료)
+      await page.waitForTimeout(2000);
+
+    } catch (error: any) {
+      console.warn(`[${contentGroup}] Lazy Loading 트리거 실패: ${error.message}`);
     }
   }
 
@@ -281,7 +395,7 @@ export class AgentWorker {
     task: AgentTask,
     page: Page,
     screenshotPath: string
-  ): Promise<BranchEventData[]> {
+  ): Promise<{ events: BranchEventData[]; visionResult: VisionPredictionResult | null }> {
     const results: BranchEventData[] = [];
 
     // Vision AI 예측 (페이지당 1회만 실행)
@@ -300,6 +414,20 @@ export class AgentWorker {
         console.log(`   - 자동 발생 이벤트: ${visionResult.autoFireEvents.join(', ') || '없음'}`);
         console.log(`   - 조건부 이벤트: ${visionResult.conditionalEvents.join(', ') || '없음'}`);
         console.log(`   - 발생 금지 이벤트: ${visionResult.forbiddenEvents.join(', ') || '없음'}`);
+
+        // 기획자/마케터 관점 요소 분석 결과 로깅
+        if (visionResult.elementAnomalies) {
+          const anomalies = visionResult.elementAnomalies;
+          if (anomalies.missingElements && anomalies.missingElements.length > 0) {
+            console.log(`   ⚠️ 누락된 기대 요소: ${anomalies.missingElements.length}개`);
+            for (const missing of anomalies.missingElements) {
+              console.log(`      - [${missing.severity}] ${missing.element}`);
+            }
+          }
+          if (anomalies.presentElements && anomalies.presentElements.length > 0) {
+            console.log(`   ✅ 발견된 기대 요소: ${anomalies.presentElements.join(', ')}`);
+          }
+        }
       }
     }
 
@@ -392,7 +520,7 @@ export class AgentWorker {
       results.push(eventData);
     }
 
-    return results;
+    return { events: results, visionResult };
   }
 
   /**
@@ -499,6 +627,11 @@ export class AgentWorker {
             });
           }
         }
+      }
+
+      // 5. 기획자/마케터 관점 요소 이상 분석 추가
+      if (prediction.elementAnomalies) {
+        result.elementAnomalies = prediction.elementAnomalies;
       }
 
       return result;

@@ -394,6 +394,37 @@ export interface ParamValidationRule {
     notEmpty?: boolean;
   };
 
+  /**
+   * 파라미터 값 예측 (Level 3 정확도 향상용)
+   * ParameterValuePredictor에서 생성
+   */
+  valuePrediction?: {
+    /**
+     * 예측된 값
+     * - VERIFIABLE: 정확한 값 예측 (GA4 비교 가능)
+     * - CONTENT_GROUP: 컨텐츠 그룹 기반 예측값
+     * - DYNAMIC: null (값 예측 불가, 존재 여부만 확인)
+     */
+    predictedValue: string | number | null;
+
+    /**
+     * 값 유형
+     * - VERIFIABLE: GA4 집계 데이터와 비교 가능 (event_category, product_id 등)
+     * - CONTENT_GROUP: 컨텐츠 그룹별 다른 값 (scroll.event_label 등)
+     * - DYNAMIC: 사용자 행동에 따라 변동 (ap_click.event_label 등)
+     */
+    valueType: 'VERIFIABLE' | 'CONTENT_GROUP' | 'DYNAMIC';
+
+    /** 예측 신뢰도 (0-100) */
+    confidence: number;
+
+    /** 값 추출 소스 (URL, DOM, 고정값 등) */
+    source?: 'FIXED' | 'URL_PARAM' | 'DOM_EXTRACT' | 'CONTENT_GROUP' | 'LEARNED';
+
+    /** 예측 실패 시 실제 값과 비교하여 이슈 리포팅 여부 */
+    shouldReportMismatch: boolean;
+  };
+
   /** 설명 */
   description: string;
 }
