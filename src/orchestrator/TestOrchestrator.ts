@@ -390,26 +390,53 @@ export class TestOrchestrator {
 
   /**
    * Branch 정확도 계산
+   * Vision AI 예측 vs GA4 실제 데이터 비교
    */
   private calculateBranchAccuracy(branch: BranchTestResult): number {
-    // TODO: 상세 비교 로직 구현
     if (branch.events.length === 0) return 0;
 
-    let matchedParams = 0;
-    let totalParams = 0;
+    let correctPredictions = 0;
+    let totalPredictions = 0;
 
     for (const event of branch.events) {
-      totalParams += event.specParams.length;
-      // 간단한 매칭: predicted와 spec 비교
-      for (const spec of event.specParams) {
-        const predicted = event.predictedParams.find(p => p.name === spec.ga4Key);
-        if (predicted && predicted.value !== null) {
-          matchedParams++;
+      // Vision AI 이벤트 발생 예측 확인
+      const predictionParam = event.predictedParams.find(p => p.name === '_event_prediction');
+      const prediction = predictionParam?.value as string | undefined;
+
+      // GA4 실제 이벤트 발생 여부 확인
+      const occurrenceParam = event.actualParams.find(p => p.name === '_event_occurred');
+      const actualOccurred = occurrenceParam && occurrenceParam.eventCount && occurrenceParam.eventCount > 0;
+
+      // 예측이 있는 경우에만 정확도 계산
+      if (prediction) {
+        totalPredictions++;
+
+        if (prediction === 'AUTO_FIRE') {
+          // 자동 발생 예측: 실제로 발생했으면 정확
+          if (actualOccurred) {
+            correctPredictions++;
+          }
+        } else if (prediction === 'FORBIDDEN') {
+          // 금지 예측: 발생하지 않았으면 정확 (또는 노이즈 수준만 발생)
+          const eventCount = occurrenceParam?.eventCount || 0;
+          // 1000건 이하는 노이즈로 간주
+          if (!actualOccurred || eventCount < 1000) {
+            correctPredictions++;
+          }
+        } else if (prediction === 'CONDITIONAL') {
+          // 조건부 예측: 발생해도 안해도 50% 정확도
+          correctPredictions += 0.5;
+        }
+      } else {
+        // 예측이 없는 경우: GA4에서 발생했으면 미탐으로 처리
+        if (actualOccurred) {
+          // 발생했지만 예측 못함 = 정확도에 영향 없음 (선택적)
+          // totalPredictions++; // 미탐을 카운트하려면 활성화
         }
       }
     }
 
-    return totalParams > 0 ? (matchedParams / totalParams) * 100 : 0;
+    return totalPredictions > 0 ? (correctPredictions / totalPredictions) * 100 : 0;
   }
 
   /**
