@@ -129,14 +129,13 @@ export class ParameterValuePredictor {
     // ⚠️ view_promotion_detail.event_label: URL_VARIABLE_PARAMS로 이동 (프로모션 제목이 들어감)
   };
 
-  // 페이지 컨텍스트에서 추출해야 하는 파라미터 (모두 DYNAMIC 분류)
-  // ⚠️ 2025-12-28: 이 파라미터들은 페이지 내용에 의존하므로 예측 불가
-  // shouldReportMismatch: false가 적용됨
-  // Vision AI가 화면을 보고 유추하며, GA4 데이터와 비교해 학습
+  // 페이지 컨텍스트에서 추출해야 하는 파라미터
+  // ⚠️ 2025-12-28: URL_FIXED 파라미터는 동일 page_location에서 일관된 값
+  //    → GA4 비교 시 동일 pageLocation 기준으로 비교 가능 (VERIFIABLE)
+  // ⚠️ DYNAMIC은 동일 URL에서도 변동하는 값 (ap_click.event_label 등)
   private static PAGE_CONTEXT_PARAMS = new Set([
-    // 상품 관련 - 실제 상품에 따라 변동 (Vision AI 학습 대상)
-    'product_id', 'product_name', 'product_price', 'product_brand', 'product_category',
-    'item_id', 'item_name', 'item_price', 'item_brand', 'item_category',
+    // 프로모션/라이브 관련 - 사용자 선택에 따라 변동 (DYNAMIC)
+    // ⚠️ 상품 파라미터(product_*)는 URL_FIXED로 이동 (동일 page_location에서 일관)
     // 프로모션 관련 - 실제 프로모션에 따라 변동
     'promotion_id', 'promotion_name', 'creative_name', 'creative_slot',
     // 검색 관련
@@ -169,19 +168,23 @@ export class ParameterValuePredictor {
     'brand_product_click': new Set(['product_name', 'product_id']),
   };
 
-  // URL-FIXED 파라미터: 동일 전체 URL(pageLocation)에서 일관된 값
+  // URL-FIXED 파라미터: 동일 page_location에서 일관된 값 (VERIFIABLE)
   // GA4 API 분석 결과 (2025-12-28): pageLocation 기준 80% 이상의 URL에서 일관성 확인
   // pageLocation은 쿼리 파라미터를 포함하므로, 상품/이벤트/검색어별로 정확히 구분됨
-  // ⚠️ 2025-12-28: product_id는 URL에서 추출하지만, GA4 전체 데이터 비교 시에는 DYNAMIC 처리
-  //    (URL별 비교가 아닌 전체 비교에서는 당연히 다른 상품들의 ID가 섞임)
+  // ⚠️ GA4 비교 시 반드시 동일 pageLocation 기준으로 비교해야 함
+  //    (GA4 전체 데이터와 비교하면 당연히 다른 상품들의 ID가 섞여서 불일치)
   private static URL_FIXED_PARAMS: Record<string, Set<string>> = {
-    // view_item: 상품 관련 파라미터는 모두 DYNAMIC (Vision AI 학습 대상)
-    // ⚠️ product_id: URL에서 추출하지만 GA4 전체 비교 시 DYNAMIC
-    // ⚠️ product_category: 화면에서 Vision AI가 유추 (breadcrumb, 상품 정보 영역)
-    // ⚠️ product_name: 동적 (실제 상품명)
-    'view_item': new Set([]),
-    // add_to_cart: 상품 관련 파라미터는 모두 DYNAMIC
-    'add_to_cart': new Set([]),
+    // view_item: 동일 page_location에서 상품 파라미터 일관 (URL_FIXED)
+    // GA4 비교 시 동일 pageLocation 기준으로 비교 가능
+    'view_item': new Set([
+      'product_id', 'product_name', 'product_category', 'product_price', 'product_brand',
+      'item_id', 'item_name', 'item_category', 'item_price', 'item_brand',
+    ]),
+    // add_to_cart: 동일 page_location에서 상품 파라미터 일관
+    'add_to_cart': new Set([
+      'product_id', 'product_name', 'product_category', 'product_price', 'product_brand',
+      'item_id', 'item_name', 'item_category', 'item_price', 'item_brand',
+    ]),
     // scroll: event_label은 dataLayer의 페이지 타입에 의존
     // ⚠️ URL 기반 페이지 타입과 dataLayer 페이지 타입이 다를 수 있음
     'scroll': new Set([]),  // CONTENT_GROUP 기반으로 처리
@@ -200,10 +203,10 @@ export class ParameterValuePredictor {
   // URL-VARIABLE 파라미터: 동일 전체 URL(pageLocation)에서도 값이 변동
   // GA4 API 분석 결과 (2025-12-28): pageLocation 기준 80% 미만의 URL에서 일관성
   private static URL_VARIABLE_PARAMS: Record<string, Set<string>> = {
-    // view_item: event_label(60%), product_name(동적) - 일부 URL에서 변동
-    'view_item': new Set(['event_label', 'product_name']),
-    // add_to_cart: product_name, event_label은 동적
-    'add_to_cart': new Set(['product_name', 'event_label']),
+    // view_item: event_label만 변동 (product_*는 URL_FIXED - 동일 page_location에서 일관)
+    'view_item': new Set(['event_label']),
+    // add_to_cart: event_label만 변동 (product_*는 URL_FIXED)
+    'add_to_cart': new Set(['event_label']),
     // begin_checkout: checkout_step, event_label (5% 일관) - cartpage vs prdbtn
     'begin_checkout': new Set(['checkout_step', 'event_label']),
     // scroll: event_action은 10%, 20%, 30%... 스크롤 깊이에 따라 변동
