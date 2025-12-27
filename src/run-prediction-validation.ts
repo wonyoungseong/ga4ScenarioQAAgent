@@ -3,12 +3,17 @@
  *
  * Account 293457213의 모든 Property를 분석하고
  * 예측 규칙을 학습/개선합니다.
+ *
+ * 인증 우선순위:
+ * 1. 서비스 계정 (./credentials/service-account.json)
+ * 2. OAuth 토큰 (./credentials/ga4_tokens.json) - 폴백
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import { PredictionValidator } from './validation/predictionValidator';
 import { GA4AdminClient } from './ga4/ga4AdminClient';
+import { ServiceAccountAuth, hasServiceAccountKey } from './ga4/serviceAccountAuth';
 
 // Account ID
 const ACCOUNT_ID = '293457213';
@@ -20,24 +25,46 @@ const PROPERTY_DOMAIN_MAP: Record<string, string> = {
   // 추가 Property는 여기에 등록 또는 자동 감지
 };
 
-// OAuth 설정
-const OAUTH_CONFIG = {
-  clientId: process.env.GA4_CLIENT_ID || '',
-  clientSecret: process.env.GA4_CLIENT_SECRET || '',
-};
+// 서비스 계정 인스턴스 (전역)
+let serviceAccountAuth: ServiceAccountAuth | null = null;
 
 /**
- * 토큰 로드
+ * Access Token 가져오기 (서비스 계정 우선)
  */
-function loadAccessToken(): string | null {
+async function getAccessToken(): Promise<string | null> {
+  // 1. 서비스 계정 우선 시도
+  if (hasServiceAccountKey()) {
+    try {
+      if (!serviceAccountAuth) {
+        serviceAccountAuth = new ServiceAccountAuth();
+        await serviceAccountAuth.initialize();
+      }
+      const token = await serviceAccountAuth.getAccessToken();
+      console.log('✅ 서비스 계정으로 인증됨');
+      return token;
+    } catch (error: any) {
+      console.warn(`⚠️ 서비스 계정 인증 실패: ${error.message}`);
+      console.log('OAuth 토큰으로 폴백합니다...');
+    }
+  }
+
+  // 2. OAuth 토큰 폴백
+  return loadOAuthToken();
+}
+
+/**
+ * OAuth 토큰 로드 (폴백용)
+ */
+function loadOAuthToken(): string | null {
   const tokenPath = './credentials/ga4_tokens.json';
   try {
     if (fs.existsSync(tokenPath)) {
       const tokens = JSON.parse(fs.readFileSync(tokenPath, 'utf-8'));
+      console.log('✅ OAuth 토큰 로드됨');
       return tokens.access_token;
     }
   } catch (error) {
-    console.error('토큰 로드 실패:', error);
+    console.error('OAuth 토큰 로드 실패:', error);
   }
   return null;
 }
@@ -116,16 +143,15 @@ async function main() {
   console.log(' 예측 검증 시스템 - Account 293457213 전체 분석');
   console.log('═'.repeat(80));
 
-  // 1. Access Token 확인
-  const accessToken = loadAccessToken();
+  // 1. Access Token 확인 (서비스 계정 우선)
+  const accessToken = await getAccessToken();
   if (!accessToken) {
-    console.error('\n❌ GA4 Access Token이 없습니다.');
-    console.log('먼저 다음 명령어로 인증하세요:');
-    console.log('  npx ts-node src/cli.ts ga4 login\n');
+    console.error('\n❌ 인증 정보가 없습니다.');
+    console.log('\n다음 중 하나를 설정하세요:');
+    console.log('  1. 서비스 계정: ./credentials/service-account.json');
+    console.log('  2. OAuth 로그인: npx ts-node src/cli.ts ga4 login\n');
     process.exit(1);
   }
-
-  console.log('✅ Access Token 로드됨');
 
   // 2. Property 도메인 매핑 확인/감지
   const domainMap = await detectPropertyDomains(accessToken, ACCOUNT_ID);
@@ -288,9 +314,9 @@ async function suggestYamlUpdates(confirmedUpdates: any[]): Promise<void> {
  * 빠른 테스트 모드
  */
 async function quickTest(pageUrl: string): Promise<void> {
-  const accessToken = loadAccessToken();
+  const accessToken = await getAccessToken();
   if (!accessToken) {
-    console.error('❌ Access Token 없음. 먼저 인증하세요.');
+    console.error('❌ 인증 정보 없음. 서비스 계정 또는 OAuth 설정을 확인하세요.');
     process.exit(1);
   }
 

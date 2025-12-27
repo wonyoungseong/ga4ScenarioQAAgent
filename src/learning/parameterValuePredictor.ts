@@ -132,9 +132,10 @@ export class ParameterValuePredictor {
   // 페이지 컨텍스트에서 추출해야 하는 파라미터 (모두 DYNAMIC 분류)
   // ⚠️ 2025-12-28: 이 파라미터들은 페이지 내용에 의존하므로 예측 불가
   // shouldReportMismatch: false가 적용됨
+  // Vision AI가 화면을 보고 유추하며, GA4 데이터와 비교해 학습
   private static PAGE_CONTEXT_PARAMS = new Set([
-    // 상품 관련 - 실제 상품에 따라 변동
-    'product_id', 'product_name', 'product_price', 'product_brand',
+    // 상품 관련 - 실제 상품에 따라 변동 (Vision AI 학습 대상)
+    'product_id', 'product_name', 'product_price', 'product_brand', 'product_category',
     'item_id', 'item_name', 'item_price', 'item_brand', 'item_category',
     // 프로모션 관련 - 실제 프로모션에 따라 변동
     'promotion_id', 'promotion_name', 'creative_name', 'creative_slot',
@@ -148,7 +149,9 @@ export class ParameterValuePredictor {
   ]);
 
   // URL에서 추출하는 파라미터
+  // ⚠️ 아모레몰: onlineProdCode가 product_id의 최우선 소스
   private static URL_PARAM_MAPPING: Record<string, string> = {
+    'product_id': 'onlineProdCode',      // 최우선: URL의 onlineProdCode
     'view_event_code': 'planDisplaySn',
     'search_term': 'keyword',
   };
@@ -169,13 +172,16 @@ export class ParameterValuePredictor {
   // URL-FIXED 파라미터: 동일 전체 URL(pageLocation)에서 일관된 값
   // GA4 API 분석 결과 (2025-12-28): pageLocation 기준 80% 이상의 URL에서 일관성 확인
   // pageLocation은 쿼리 파라미터를 포함하므로, 상품/이벤트/검색어별로 정확히 구분됨
+  // ⚠️ 2025-12-28: product_id는 URL에서 추출하지만, GA4 전체 데이터 비교 시에는 DYNAMIC 처리
+  //    (URL별 비교가 아닌 전체 비교에서는 당연히 다른 상품들의 ID가 섞임)
   private static URL_FIXED_PARAMS: Record<string, Set<string>> = {
-    // view_item: 동일 상품 URL에서는 product_id, product_category 일관
-    // ⚠️ product_name은 동적이므로 제외 (실제 상품명이 들어감)
-    'view_item': new Set(['product_id', 'product_category']),
-    // add_to_cart: 동일 상품 URL에서 대부분 파라미터 일관
-    // ⚠️ product_name, event_label은 동적이므로 제외
-    'add_to_cart': new Set(['product_id', 'product_category']),
+    // view_item: 상품 관련 파라미터는 모두 DYNAMIC (Vision AI 학습 대상)
+    // ⚠️ product_id: URL에서 추출하지만 GA4 전체 비교 시 DYNAMIC
+    // ⚠️ product_category: 화면에서 Vision AI가 유추 (breadcrumb, 상품 정보 영역)
+    // ⚠️ product_name: 동적 (실제 상품명)
+    'view_item': new Set([]),
+    // add_to_cart: 상품 관련 파라미터는 모두 DYNAMIC
+    'add_to_cart': new Set([]),
     // scroll: event_label은 dataLayer의 페이지 타입에 의존
     // ⚠️ URL 기반 페이지 타입과 dataLayer 페이지 타입이 다를 수 있음
     'scroll': new Set([]),  // CONTENT_GROUP 기반으로 처리
