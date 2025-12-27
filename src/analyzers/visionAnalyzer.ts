@@ -15,6 +15,7 @@ import {
   FunnelStepScenario,
   SCENARIO_TEMPLATES,
 } from '../scenario/funnelScenarioDesigner';
+import { PageTypeDetector, UrlExtractedParams } from './pageTypeDetector';
 
 /**
  * 파라미터 값 예측 결과
@@ -218,6 +219,7 @@ export class GeminiVisionAnalyzer {
   private specLoader: SpecLoader | null;
   private currentSiteId: string | null = null;
   private predictionRules: any = null;
+  private pageTypeDetector: PageTypeDetector;
 
   constructor(apiKey: string, guidesDir: string = './guides', specLoader?: SpecLoader) {
     this.genAI = new GoogleGenerativeAI(apiKey);
@@ -226,6 +228,7 @@ export class GeminiVisionAnalyzer {
     });
     this.guidesDir = guidesDir;
     this.specLoader = specLoader || null;
+    this.pageTypeDetector = new PageTypeDetector();
     this.loadPredictionRules();
   }
 
@@ -1409,10 +1412,11 @@ URL: ${pageUrl}
   /**
    * Vision AI가 스크린샷을 보고 페이지 타입과 변수를 즉시 예측
    *
-   * 3단계 흐름:
-   * 1. 화면 보고 → 페이지 타입 판단
-   * 2. 페이지 타입에 따라 → 변수 예측
-   * 3. 페이지 타입에 따라 → 이벤트 예측
+   * 개선된 흐름:
+   * 1. URL에서 사이트명, 페이지 타입 감지
+   * 2. URL에서 추출 가능한 파라미터 먼저 추출
+   * 3. 페이지 타입별 specialized 프롬프트로 Vision AI 호출
+   * 4. 결과 병합 후 반환
    */
   async predictPageVariables(
     screenshotPath: string,
@@ -1424,6 +1428,12 @@ URL: ${pageUrl}
   ): Promise<PageVariablePrediction> {
     const imageBase64 = await this.imageToBase64(screenshotPath);
     const mimeType = this.getMimeType(screenshotPath);
+
+    // === 1단계: URL 분석 ===
+    const siteName = this.pageTypeDetector.getSiteName(pageUrl);
+    const detectedPageType = this.pageTypeDetector.detectPageType(pageUrl, siteName || undefined);
+    const urlParams = this.pageTypeDetector.extractParamsFromUrl(pageUrl);
+    const pageTypeConfig = this.pageTypeDetector.getPageTypeConfig(detectedPageType);
 
     // 예측 규칙 로드
     const rulesPath = path.join(process.cwd(), 'config', 'vision-prediction-rules.json');
@@ -1472,6 +1482,8 @@ URL: ${pageUrl}
     }
 
     // site_country, site_language 추출
+    // - site_country: ISO 3166-1 Alpha-2 국가코드 (KR, US, JP, CN 등)
+    // - site_language: ISO 639-1 언어코드 대문자 (KO, EN, JA, ZH 등)
     // 1. URL에서 /kr/ko/ 패턴 확인
     // 2. URL에 없으면 html lang 속성 기준
     // 3. INT 사이트: URL에 /int/ + 영어 → 국가 GL
@@ -1484,12 +1496,14 @@ URL: ${pageUrl}
 
     if (countryMatch && langMatch) {
       // URL에 국가/언어 패턴이 있는 경우
+      // site_country: ISO 3166-1 Alpha-2 (KR, US, JP 등)
       expectedCountry = countryMatch[1].toUpperCase();
-      expectedLanguage = `${langMatch[1].toLowerCase()}-${expectedCountry}`;
+      // site_language: ISO 639-1 대문자 (KO, EN, JA 등)
+      expectedLanguage = langMatch[1].toUpperCase();
     } else if (isIntSite) {
       // INT 사이트 (글로벌)
       expectedCountry = 'GL';
-      expectedLanguage = 'en-GL';
+      expectedLanguage = 'EN';
     } else {
       // URL에 없으면 html lang에서 추출하도록 Vision AI에 위임
       expectedCountry = 'DETECT_FROM_HTML_LANG';
@@ -1526,12 +1540,13 @@ URL: ${pageUrl}
       // 상품 상세 (Cafe24 패턴 포함: /product/상품명/숫자/)
       if (/\/product\/detail|\/ProductView|\/shop\/item\/|\/goods\/\d|product_no=|onlineProdSn=|onlineProdCode=/.test(urlLower)) return 'PRODUCT_DETAIL';
       if (/\/product\/[^\/]+\/\d+\//.test(urlLower)) return 'PRODUCT_DETAIL'; // Cafe24: /product/상품명/숫자/
+      if (/\/prd\/detail\//.test(urlLower)) return 'PRODUCT_DETAIL'; // 아모레몰: /prd/detail/숫자
 
       // 이벤트 상세
-      if (/\/event\/|\/article\/event\/|\/promotion\//.test(urlLower)) return 'EVENT_DETAIL';
+      if (/\/event\/|\/article\/event\/|\/promotion\/|\/event_detail|planDisplaySn=/.test(urlLower)) return 'EVENT_DETAIL';
 
       // 브랜드 메인
-      if (/\/brand\/|\/brandshop\//.test(urlLower)) return 'BRAND_MAIN';
+      if (/\/brand\/detail|\/brandshop\/|brandSn=/.test(urlLower)) return 'BRAND_MAIN';
 
       // 마이페이지
       if (/\/mypage|\/my\/|\/member\/|\/login/.test(urlLower)) return 'MY';
@@ -1539,12 +1554,28 @@ URL: ${pageUrl}
       // 상품 목록 (Cafe24 패턴 포함: /category/숫자/)
       if (/\/category\/|\/shop\/list|\/goods\/catalog/.test(urlLower)) return 'PRODUCT_LIST';
       if (/\/product\/.*\/category\/\d+\//.test(urlLower)) return 'PRODUCT_LIST'; // Cafe24 카테고리
+      if (/\/prd\/cate\/list\//.test(urlLower)) return 'PRODUCT_LIST'; // 아모레몰: /prd/cate/list/카테고리ID
 
       return null; // 판단 불가
     })();
 
-    const systemPrompt = `당신은 웹 페이지 분석 전문가입니다.
-스크린샷을 보고 즉시 페이지 타입과 GA4 변수 값을 예측합니다.
+    const systemPrompt = `당신은 웹 페이지 스크린샷을 분석하는 전문가입니다.
+
+## 🔴 핵심 임무: 스크린샷에서 텍스트를 직접 읽어서 추출하세요!
+
+당신의 주요 역할:
+1. **스크린샷 이미지를 OCR처럼 읽어서** 화면에 표시된 텍스트를 추출합니다
+2. 상품명, 브랜드명, 가격, 검색어 등 **화면에 보이는 모든 텍스트**를 읽으세요
+3. 추출한 텍스트를 JSON의 해당 필드에 입력하세요
+
+**예시 - PRODUCT_DETAIL 페이지 스크린샷 분석:**
+- 화면 상단에 "설화수" 로고가 보임 → product_brandname: "설화수"
+- 큰 글씨로 "윤조에센스 리뉴 90ml"가 보임 → product_name: "윤조에센스 리뉴 90ml"
+- "156,000원" 가격이 보임 → product_price: 156000
+- breadcrumb에 "스킨케어 > 에센스"가 보임 → product_category: "스킨케어 > 에센스"
+
+**예시 - MAIN 페이지 스크린샷 분석:**
+- 메인 배너에 "첫구매 혜택 다드려요" 문구가 보임 → promotion_name: "첫구매 혜택 다드려요"
 
 ${urlPageTypeHint ? `## ⚠️ URL 패턴 기반 페이지 타입 힌트
 URL 분석 결과: **${urlPageTypeHint}** 페이지로 추정됩니다.
@@ -1561,12 +1592,14 @@ URL 분석 결과: **${urlPageTypeHint}** 페이지로 추정됩니다.
 **site_country / site_language**:
 ${expectedCountry === 'DETECT_FROM_HTML_LANG' ?
 `- URL에 국가/언어 패턴 없음 → html lang 속성에서 추출
-- html lang="ko" → site_country=KR, site_language=ko-KR
-- html lang="en" → site_country=US, site_language=en-US (단, URL에 /int/ 있으면 GL)
-- html lang="ja" → site_country=JP, site_language=ja-JP
-- html lang="zh" → site_country=CN, site_language=zh-CN` :
-`- site_country = "${expectedCountry}" (URL에서 추출)
-- site_language = "${expectedLanguage}" (URL에서 추출)`}
+- site_country: ISO 3166-1 Alpha-2 국가코드 (KR, US, JP, CN 등)
+- site_language: ISO 639-1 언어코드 대문자 (KO, EN, JA, ZH 등)
+- html lang="ko" → site_country=KR, site_language=KO
+- html lang="en" → site_country=US, site_language=EN (단, URL에 /int/ 있으면 GL)
+- html lang="ja" → site_country=JP, site_language=JA
+- html lang="zh" → site_country=CN, site_language=ZH` :
+`- site_country = "${expectedCountry}" (ISO 3166-1 Alpha-2)
+- site_language = "${expectedLanguage}" (ISO 639-1 대문자)`}
 
 **channel**:
 ${expectedChannel !== 'DETECT_FROM_SCREENSHOT'
@@ -1575,18 +1608,20 @@ ${expectedChannel !== 'DETECT_FROM_SCREENSHOT'
 - PC: 넓은 데스크톱 레이아웃, 상단 전체 메뉴 펼침, 다단 컬럼
 - MO: 모바일 레이아웃, 햄버거 메뉴(≡), 하단 고정 탭바, 전체 너비 사용`}
 
-### 2. 페이지 위치 변수 (URL 100자 분할, 5개)
-**중요**: page_location은 breadcrumb이 아니라 full URL을 100자 단위로 분할한 값입니다.
-GA4 Custom Dimension 100자 제한으로 인해 URL이 잘리면 데이터 오류가 발생하므로 분할 저장합니다.
+### 2. 페이지 위치 변수 (Breadcrumb 기반, 5개)
+**중요**: page_location은 화면의 breadcrumb(페이지 경로)를 depth별로 저장합니다.
+breadcrumb이 없는 페이지는 모두 null로 설정하세요.
 
-- page_location_1: URL의 1~100자
-- page_location_2: URL의 101~200자 (없으면 null)
-- page_location_3: URL의 201~300자 (없으면 null)
-- page_location_4: URL의 301~400자 (없으면 null)
-- page_location_5: URL의 401~500자 (없으면 null)
+- page_location_1: breadcrumb 1depth (예: "홈", "메인")
+- page_location_2: breadcrumb 2depth (예: "스킨케어", "검색결과")
+- page_location_3: breadcrumb 3depth (예: "에센스/세럼")
+- page_location_4: breadcrumb 4depth (있으면)
+- page_location_5: breadcrumb 5depth (있으면)
 
-예시: URL이 "https://www.amoremall.com/kr/ko/product/detail?onlineProdCode=12345" (68자)
-→ page_location_1 = 전체 URL, page_location_2~5 = null
+예시: 화면에 "홈 > 스킨케어 > 에센스" breadcrumb이 있으면
+→ page_location_1="홈", page_location_2="스킨케어", page_location_3="에센스", 나머지=null
+
+**breadcrumb이 보이지 않으면 모두 null**
 
 ### 3. 페이지 타입 판단 우선순위
 ${JSON.stringify(rules.step1_pageType?.priority_rules || [], null, 2)}
@@ -1656,15 +1691,83 @@ ${JSON.stringify(rules.step3_events?.autoFire || {}, null, 2)}
 발생하면 안 되는 이벤트:
 ${JSON.stringify(rules.step3_events?.forbidden || {}, null, 2)}`;
 
+    // === 2단계: 페이지 타입별 specialized 프롬프트 생성 ===
+    const pageTypeHint = detectedPageType;
+    const urlPageTypeHintForPrompt = pageTypeHint
+      ? `\n⚠️ **URL 패턴 힌트**: 이 URL은 "${pageTypeHint}" 페이지로 추정됩니다. 스크린샷을 확인하여 최종 결정하세요.`
+      : '';
+
+    // URL에서 미리 추출된 값 표시
+    const urlExtractedInfo = Object.entries(urlParams)
+      .filter(([_, v]) => v)
+      .map(([k, v]) => `- ${k}: "${v}" (URL에서 추출됨, 이 값 사용)`)
+      .join('\n');
+
+    // 페이지 타입별 conditionalVariables 예시 (개선된 버전 - 실제값 강조)
+    const conditionalVarsExample = pageTypeHint === 'PRODUCT_DETAIL'
+      ? `"product_id": "${urlParams.product_id || '(스크린샷에서 읽은 상품코드)'}",
+    "product_name": "(스크린샷에서 읽은 상품명 - 예: 윤조에센스 리뉴 90ml)",
+    "product_brandname": "(스크린샷에서 읽은 브랜드명 - 예: 설화수)",
+    "product_category": "(스크린샷 breadcrumb - 예: 스킨케어 > 에센스)",
+    "product_is_stock": "Y",
+    "product_price": "(스크린샷에서 읽은 판매가 숫자 - 예: 156000)",
+    "product_prdprice": "(스크린샷에서 읽은 정가 숫자 또는 null)"`
+      : pageTypeHint === 'SEARCH_RESULT'
+      ? `"search_term": "${urlParams.search_term || '(스크린샷 검색창의 검색어)'}",
+    "search_result": "Y",
+    "search_result_count": "(스크린샷에서 읽은 결과 수 - 예: 156)"`
+      : pageTypeHint === 'PRODUCT_LIST'
+      ? `"item_list_name": "(스크린샷에서 읽은 카테고리명 - 예: 스킨케어)"`
+      : pageTypeHint === 'CART'
+      ? `"cart_item_count": "(스크린샷에서 읽은 상품 수)",
+    "cart_total_price": "(스크린샷에서 읽은 총 금액 숫자)"`
+      : pageTypeHint === 'EVENT_DETAIL'
+      ? `"view_event_name": "(스크린샷에서 읽은 이벤트 제목)",
+    "view_event_code": "${urlParams.view_event_code || '(URL에서 추출)'}"`
+      : pageTypeHint === 'BRAND_MAIN'
+      ? `"brandshop_name": "(스크린샷에서 읽은 브랜드명)",
+    "brandshop_code": "(URL에서 추출)"`
+      : pageTypeHint === 'MAIN'
+      ? `"promotion_name": "(스크린샷 메인배너에서 읽은 프로모션 문구 - 예: 첫구매 혜택 다드려요)",
+    "creative_slot": "main_banner_1"`
+      : `"// 해당 없음": null`;
+
+    // 사이트명 없을 때 종합 검토 항목
+    const comprehensiveCheckPrompt = !siteName ? `
+
+## 📋 종합 검토 항목 (사이트 미식별)
+아래 항목들을 모두 확인하여 파라미터를 추출하세요:
+${this.pageTypeDetector.getComprehensiveCheckList().map(item => `- ${item}`).join('\n')}
+` : '';
+
     const userPrompt = `## 분석할 페이지
 URL: ${pageUrl}
+${siteName ? `사이트: ${siteName}` : '⚠️ 사이트 미식별 - 종합 검토 필요'}
 
-## 고정값
-- site_name: "${expectedSiteName}"
-- site_env: "${expectedEnv}"
-${expectedCountry !== 'DETECT_FROM_HTML_LANG' ? `- site_country: "${expectedCountry}"
-- site_language: "${expectedLanguage}"` : ''}
+## 🔴 URL 패턴 분석 결과 (이 페이지 타입 사용!)
+**페이지 타입**: ${pageTypeHint || 'OTHERS'}
+**content_group**: ${pageTypeHint || 'OTHERS'}
+${pageTypeHint ? `\n⚠️ URL 패턴으로 "${pageTypeHint}" 페이지로 확정되었습니다. 화면이 명백히 다른 경우에만 변경하세요.` : ''}
+
+## 고정값 (URL에서 추출됨 - 그대로 사용)
+- site_name: "${siteName || expectedSiteName}"
+- site_env: "${urlParams.site_env || expectedEnv}"
+${urlParams.site_country ? `- site_country: "${urlParams.site_country}"` : expectedCountry !== 'DETECT_FROM_HTML_LANG' ? `- site_country: "${expectedCountry}"` : ''}
+${urlParams.site_language ? `- site_language: "${urlParams.site_language}"` : expectedLanguage !== 'DETECT_FROM_HTML_LANG' ? `- site_language: "${expectedLanguage}"` : ''}
 ${expectedChannel !== 'DETECT_FROM_SCREENSHOT' ? `- channel: "${expectedChannel}"` : ''}
+${urlExtractedInfo ? `\n## URL에서 추출된 파라미터 (이 값 우선 사용)\n${urlExtractedInfo}` : ''}
+${comprehensiveCheckPrompt}
+## ⚠️ 중요: conditionalVariables 필수 입력
+페이지 타입에 따라 conditionalVariables를 **반드시** 채워야 합니다:
+- **PRODUCT_DETAIL**: product_id, product_name, product_brandname, product_category, product_is_stock, product_price
+- **SEARCH_RESULT**: search_term, search_result, search_result_count
+- **PRODUCT_LIST**: item_list_name
+- **CART**: cart_item_count, cart_total_price
+- **EVENT_DETAIL**: view_event_name, view_event_code
+- **BRAND_MAIN**: brandshop_name, brandshop_code
+
+🔴 **화면에서 보이는 텍스트를 그대로 추출하세요. null 최소화!**
+🔴 **상품명, 브랜드명, 가격, 검색어 등은 반드시 채워야 합니다.**
 
 ## 요청
 스크린샷을 분석하여 다음 JSON 형식으로 응답하세요 (전체 45개+ 파라미터 지원):
@@ -1679,18 +1782,18 @@ ${expectedChannel !== 'DETECT_FROM_SCREENSHOT' ? `- channel: "${expectedChannel}
     "site_language": "${expectedLanguage !== 'DETECT_FROM_HTML_LANG' ? expectedLanguage : 'html lang 기반 추출'}",
     "site_env": "${expectedEnv}",
     "channel": "${expectedChannel !== 'DETECT_FROM_SCREENSHOT' ? expectedChannel : 'PC 또는 MO'}",
-    "content_group": "pageType과 동일",
+    "content_group": "${pageTypeHint || 'pageType과 동일'}",
     "login_is_login": "N (기본값. 아래 조건 충족 시에만 Y)"
   },
   "pageLocationVariables": {
-    "page_location_1": "breadcrumb 1뎁스 또는 null",
-    "page_location_2": "breadcrumb 2뎁스 또는 null",
-    "page_location_3": "breadcrumb 3뎁스 또는 null",
-    "page_location_4": "breadcrumb 4뎁스 또는 null",
-    "page_location_5": "breadcrumb 5뎁스 또는 null"
+    "page_location_1": "화면 breadcrumb 1depth 텍스트 (없으면 null)",
+    "page_location_2": "화면 breadcrumb 2depth 텍스트 (없으면 null)",
+    "page_location_3": "화면 breadcrumb 3depth 텍스트 (없으면 null)",
+    "page_location_4": "화면 breadcrumb 4depth 텍스트 (없으면 null)",
+    "page_location_5": "화면 breadcrumb 5depth 텍스트 (없으면 null)"
   },
   "conditionalVariables": {
-    "// 페이지 타입별 변수 - 아래 예시 참조": ""
+    ${conditionalVarsExample}
   },
   "events": {
     "autoFire": ["페이지 타입별 자동 이벤트"],
@@ -1719,28 +1822,41 @@ ${expectedChannel !== 'DETECT_FROM_SCREENSHOT' ? `- channel: "${expectedChannel}
 
 **STORE**: page_store_code, page_store_name
 
-## 중요 - 반드시 따르세요
-1. site_name, site_env, channel은 위에서 지정한 고정값 그대로 사용
-2. 페이지 타입은 팝업을 무시하고 메인 콘텐츠로 판단
-3. 이벤트 팝업이 있어도 배경이 메인 페이지면 MAIN
-4. **pageLocationVariables는 breadcrumb이 보일 때만 채우세요** (없으면 모두 null)
-5. **conditionalVariables는 반드시 화면에서 읽어서 채우세요**:
-   - **product_name**: 화면에서 가장 큰 상품명 텍스트를 그대로 복사 (예: "설화수 윤조에센스 90ml")
-   - **product_brandname**: 상품명 근처의 브랜드명 텍스트 (예: "설화수", "라네즈", "이니스프리")
-   - **product_price**: 판매가 숫자만 추출 (예: "45,000원" → 45000)
-   - **product_prdprice**: 정가/원가 숫자만 (할인 전 가격, 취소선 있는 가격)
-   - **product_category**: 브레드크럼이나 카테고리 표시 텍스트
-   - **search_term**: 검색창에 입력된 검색어 텍스트
-   - **search_result_count**: "총 123개 결과" 같은 텍스트에서 숫자만 추출
-   - 화면에서 명확히 보이는 텍스트는 반드시 추출하세요
-   - 화면에서 확인 불가능한 경우에만 null
-6. **product_id, view_event_code 등은 URL에서 추출** (onlineProdSn, product_no, /product/숫자 등)
-7. **null이 아닌 실제 값 우선**: 화면에 상품명, 가격이 보이면 반드시 해당 값을 입력하세요
-8. **login_is_login 판단 기준** (기본값 N, 아래 조건 모두 충족 시에만 Y):
-   - 헤더에 "로그인" 버튼이 아닌 사용자 프로필/이름이 보임 (예: "OOO님", 프로필 아이콘)
-   - "로그아웃" 버튼이 보임
-   - "마이페이지" 영역에 실제 사용자 정보(포인트, 쿠폰 수 등)가 표시됨
-   - 단순히 "로그인" 링크만 있거나 정보가 불분명하면 무조건 N`;
+## 🚨 중요 - 반드시 따르세요 (위반 시 오류)
+
+### 1. 페이지 타입 및 content_group (필수!)
+- **pageType** = "${pageTypeHint || 'URL 패턴 분석 결과'}" (URL 패턴으로 확정됨, 화면이 명백히 다를 때만 변경)
+- **content_group** = pageType과 동일 값 (예: PRODUCT_DETAIL → "PRODUCT_DETAIL")
+
+### 2. 고정값 (변경 금지)
+- site_name, site_env, site_country, site_language는 위에서 지정한 값 그대로 사용
+
+### 3. pageLocationVariables (breadcrumb)
+- 화면에 "홈 > 스킨케어 > 에센스" 같은 breadcrumb이 보이면 각 depth를 분리해서 입력
+- **breadcrumb이 없으면 모두 null** (URL을 넣지 마세요!)
+
+### 4. 🔴 conditionalVariables - 가장 중요! (비어있으면 안됨)
+**페이지 타입이 ${pageTypeHint || 'MAIN이 아니'}면 conditionalVariables를 반드시 채우세요!**
+
+${pageTypeHint === 'PRODUCT_DETAIL' ? `**PRODUCT_DETAIL 필수 파라미터:**
+- product_id: URL의 /prd/detail/ 뒤 숫자 (예: ${urlParams.product_id || 'URL에서 추출'})
+- product_name: 화면의 가장 큰 상품명 텍스트 (예: "설화수 윤조에센스 90ml")
+- product_brandname: 상품명 위/옆의 브랜드명 (예: "설화수", "헤라")
+- product_price: 판매가 숫자만 (예: 45000)
+- product_is_stock: "Y" (품절 표시 있으면 "N")
+- product_category: breadcrumb 텍스트` : pageTypeHint === 'SEARCH_RESULT' ? `**SEARCH_RESULT 필수 파라미터:**
+- search_term: 검색창의 검색어 (예: "${urlParams.search_term || '검색어'}")
+- search_result: "Y" (결과 있음) 또는 "N" (결과 없음)
+- search_result_count: "총 N개" 텍스트에서 숫자만` : pageTypeHint === 'PRODUCT_LIST' ? `**PRODUCT_LIST 필수 파라미터:**
+- item_list_name: 페이지 제목 또는 카테고리명` : `**해당 페이지 타입의 조건부 변수를 모두 채우세요**`}
+
+### 5. 화면에서 보이는 텍스트는 반드시 추출
+- 상품명, 브랜드명, 가격, 검색어 등이 화면에 보이면 **반드시** 해당 값을 입력
+- **null은 화면에서 정말로 확인 불가능할 때만 사용**
+
+### 6. login_is_login (기본값 N)
+- 헤더에 "OOO님" 같은 사용자 이름이나 프로필이 보이면 "Y"
+- "로그인" 버튼만 보이면 "N"`;
 
     try {
       const result = await this.model.generateContent([
@@ -1757,19 +1873,61 @@ ${expectedChannel !== 'DETECT_FROM_SCREENSHOT' ? `- channel: "${expectedChannel}
       const text = response.text();
 
       // JSON 파싱
+      let prediction: any;
       const jsonMatch = text.match(/```json\n?([\s\S]*?)\n?```/);
       if (jsonMatch) {
-        return JSON.parse(jsonMatch[1]);
+        prediction = JSON.parse(jsonMatch[1]);
+      } else {
+        // JSON 블록이 없으면 전체 텍스트에서 JSON 찾기
+        const jsonStart = text.indexOf('{');
+        const jsonEnd = text.lastIndexOf('}');
+        if (jsonStart !== -1 && jsonEnd !== -1) {
+          prediction = JSON.parse(text.substring(jsonStart, jsonEnd + 1));
+        } else {
+          throw new Error('응답에서 JSON을 찾을 수 없습니다.');
+        }
       }
 
-      // JSON 블록이 없으면 전체 텍스트에서 JSON 찾기
-      const jsonStart = text.indexOf('{');
-      const jsonEnd = text.lastIndexOf('}');
-      if (jsonStart !== -1 && jsonEnd !== -1) {
-        return JSON.parse(text.substring(jsonStart, jsonEnd + 1));
+      // === 후처리: URL 패턴 기반 값으로 교정 ===
+
+      // 1. pageType 교정: URL 패턴 결과가 있으면 우선 사용 (Vision AI가 OTHERS로 잘못 판단한 경우)
+      if (pageTypeHint && pageTypeHint !== 'OTHERS' && prediction.pageType === 'OTHERS') {
+        prediction.pageType = pageTypeHint;
       }
 
-      throw new Error('응답에서 JSON을 찾을 수 없습니다.');
+      // 2. content_group 교정: pageType과 동일하게
+      if (prediction.variables) {
+        prediction.variables.content_group = prediction.pageType || pageTypeHint || 'OTHERS';
+      }
+
+      // 3. conditionalVariables 채우기: URL에서 추출한 값들 추가
+      if (!prediction.conditionalVariables) {
+        prediction.conditionalVariables = {};
+      }
+
+      // URL에서 추출된 파라미터 병합 (Vision AI가 채우지 않은 경우에만)
+      if (urlParams.product_id && !prediction.conditionalVariables.product_id) {
+        prediction.conditionalVariables.product_id = urlParams.product_id;
+      }
+      if (urlParams.search_term && !prediction.conditionalVariables.search_term) {
+        prediction.conditionalVariables.search_term = urlParams.search_term;
+      }
+      if (urlParams.view_event_code && !prediction.conditionalVariables.view_event_code) {
+        prediction.conditionalVariables.view_event_code = urlParams.view_event_code;
+      }
+      if (urlParams.site_country && !prediction.variables?.site_country) {
+        if (!prediction.variables) prediction.variables = {};
+        prediction.variables.site_country = urlParams.site_country;
+      }
+      if (urlParams.site_language && !prediction.variables?.site_language) {
+        if (!prediction.variables) prediction.variables = {};
+        prediction.variables.site_language = urlParams.site_language;
+      }
+
+      // URL에서 추출된 파라미터 추가 (소스 추적용)
+      prediction.urlParams = urlParams as Record<string, string | number | null>;
+
+      return prediction;
     } catch (error: any) {
       console.error('Vision 변수 예측 오류:', error.message);
       throw error;
@@ -2143,4 +2301,6 @@ export interface PageVariablePrediction {
   };
   /** 판단 근거 */
   reasoning: string;
+  /** URL에서 추출된 파라미터 (소스 추적용) */
+  urlParams?: Record<string, string | number | null>;
 }

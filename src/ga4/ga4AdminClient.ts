@@ -198,6 +198,25 @@ export class GA4AdminClient {
   }
 
   /**
+   * 커스텀 디멘션 조회
+   */
+  async listCustomDimensions(propertyId: string): Promise<any[]> {
+    if (!this.client) {
+      throw new Error('클라이언트가 초기화되지 않았습니다.');
+    }
+
+    try {
+      const [customDimensions] = await this.client.listCustomDimensions({
+        parent: `properties/${propertyId}`,
+      });
+
+      return customDimensions || [];
+    } catch (error: any) {
+      throw new Error(`커스텀 디멘션 조회 실패: ${error.message}`);
+    }
+  }
+
+  /**
    * 서비스 계정 이메일 반환 (서비스 계정 인증 시)
    */
   getServiceAccountEmail(): string | null {

@@ -15,6 +15,8 @@ import {
   FunnelScenario,
   SCENARIO_TEMPLATES,
 } from './scenario/funnelScenarioDesigner';
+import { createBranchCommands } from './cli/branchCommands';
+import { createTestCommands } from './cli/testCommands';
 
 const program = new Command();
 
@@ -1145,5 +1147,9 @@ funnel
     console.log(chalk.gray('   npx ts-node src/cli.ts funnel checklist    # 검증 체크리스트'));
     console.log(chalk.gray('   npx ts-node src/cli.ts funnel rules        # 일관성 규칙'));
   });
+
+// Multi-branch 테스트 명령어
+program.addCommand(createBranchCommands());
+program.addCommand(createTestCommands());
 
 program.parse();
