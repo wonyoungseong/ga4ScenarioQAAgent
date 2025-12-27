@@ -168,6 +168,62 @@ export class PredictionValidator {
   }
 
   /**
+   * URL 경로에서 content_group 추론
+   */
+  private inferContentGroupFromPath(pagePath: string): string | null {
+    const path = pagePath.toLowerCase();
+
+    // 아모레몰 URL 패턴
+    if (path === '/' || path === '/kr/ko' || path === '/kr/ko/') {
+      return 'MAIN';
+    }
+    if (path.includes('/product/detail')) {
+      return 'PRODUCT_DETAIL';
+    }
+    if (path.includes('/product/list') || path.includes('/category/')) {
+      return 'PRODUCT_LIST';
+    }
+    if (path.includes('/search')) {
+      return 'SEARCH_RESULT';
+    }
+    if (path.includes('/cart')) {
+      return 'CART';
+    }
+    if (path.includes('/order')) {
+      return 'ORDER';
+    }
+    if (path.includes('/mypage') || path.includes('/my/')) {
+      return 'MY';
+    }
+    if (path.includes('/event/') && path.includes('/detail')) {
+      return 'EVENT_DETAIL';
+    }
+    if (path.includes('/event')) {
+      return 'EVENT_LIST';
+    }
+    if (path.includes('/brand/') && path.includes('/main')) {
+      return 'BRAND_MAIN';
+    }
+    if (path.includes('/brand/')) {
+      return 'BRAND_PRODUCT_LIST';
+    }
+    if (path.includes('/live/') && path.includes('/detail')) {
+      return 'LIVE_DETAIL';
+    }
+    if (path.includes('/live')) {
+      return 'LIVE_LIST';
+    }
+    if (path.includes('/login')) {
+      return 'LOGIN';
+    }
+    if (path.includes('/membership')) {
+      return 'MEMBERSHIP';
+    }
+
+    return null; // 추론 불가
+  }
+
+  /**
    * 특정 Account의 모든 Property 조회
    */
   async getProperties(accountId: string): Promise<GA4Property[]> {
@@ -201,26 +257,94 @@ export class PredictionValidator {
 
     console.log(`\n📊 Property ${propertyId}의 content_group별 페이지 조회 중...`);
 
-    // content_group별 page_view 조회
-    const [response] = await (ga4Client as any).client.runReport({
-      property: `properties/${propertyId}`,
-      dateRanges: [{ startDate: '7daysAgo', endDate: 'today' }],
-      dimensions: [
-        { name: 'customEvent:content_group' },
-        { name: 'pagePath' },
-      ],
-      metrics: [{ name: 'eventCount' }],
-      dimensionFilter: {
-        filter: {
-          fieldName: 'eventName',
-          stringFilter: { value: 'page_view' },
+    // 시도할 content_group 차원 이름들 (사이트마다 다를 수 있음)
+    const possibleDimensionNames = [
+      'customEvent:content_group',
+      'customEvent:contentGroup',
+      'customEvent:AP_DATA_PAGETYPE',
+      'customEvent:page_type',
+    ];
+
+    let response: any = null;
+    let usedDimensionName = '';
+
+    // 각 차원 이름을 시도
+    for (const dimName of possibleDimensionNames) {
+      try {
+        const [resp] = await (ga4Client as any).client.runReport({
+          property: `properties/${propertyId}`,
+          dateRanges: [{ startDate: '7daysAgo', endDate: 'today' }],
+          dimensions: [
+            { name: dimName },
+            { name: 'pagePath' },
+          ],
+          metrics: [{ name: 'eventCount' }],
+          dimensionFilter: {
+            filter: {
+              fieldName: 'eventName',
+              stringFilter: { value: 'page_view' },
+            },
+          },
+          orderBys: [
+            { metric: { metricName: 'eventCount' }, desc: true },
+          ],
+          limit: 500,
+        });
+        response = resp;
+        usedDimensionName = dimName;
+        console.log(`   ✅ 차원 발견: ${dimName}`);
+        break;
+      } catch (error: any) {
+        // 이 차원 이름은 실패, 다음 시도
+        continue;
+      }
+    }
+
+    // 모든 차원 이름 실패 시 pagePath만으로 폴백
+    if (!response) {
+      console.log(`   ⚠️ content_group 차원 없음, pagePath로 폴백`);
+      const [fallbackResp] = await (ga4Client as any).client.runReport({
+        property: `properties/${propertyId}`,
+        dateRanges: [{ startDate: '7daysAgo', endDate: 'today' }],
+        dimensions: [{ name: 'pagePath' }],
+        metrics: [{ name: 'eventCount' }],
+        dimensionFilter: {
+          filter: {
+            fieldName: 'eventName',
+            stringFilter: { value: 'page_view' },
+          },
         },
-      },
-      orderBys: [
-        { metric: { metricName: 'eventCount' }, desc: true },
-      ],
-      limit: 500,
-    });
+        orderBys: [
+          { metric: { metricName: 'eventCount' }, desc: true },
+        ],
+        limit: 100,
+      });
+
+      // pagePath에서 content_group 추론
+      const contentGroupMap = new Map<string, ContentGroupPage>();
+      if (fallbackResp.rows) {
+        for (const row of fallbackResp.rows) {
+          const pagePath = row.dimensionValues?.[0]?.value || '';
+          const count = parseInt(row.metricValues?.[0]?.value || '0', 10);
+          if (!pagePath) continue;
+
+          // URL 패턴에서 content_group 추론
+          const inferredCG = this.inferContentGroupFromPath(pagePath);
+          if (!inferredCG) continue;
+
+          const existing = contentGroupMap.get(inferredCG);
+          if (!existing || count > existing.pageViewCount) {
+            contentGroupMap.set(inferredCG, {
+              contentGroup: inferredCG,
+              pagePath,
+              pageUrl: `https://${domain}${pagePath}`,
+              pageViewCount: count,
+            });
+          }
+        }
+      }
+      return Array.from(contentGroupMap.values());
+    }
 
     // content_group별로 가장 많은 page_view를 가진 페이지 추출
     const contentGroupMap = new Map<string, ContentGroupPage>();
