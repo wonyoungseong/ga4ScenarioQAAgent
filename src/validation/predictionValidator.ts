@@ -15,6 +15,8 @@ import {
   PredictionContext,
   PredictionResult,
 } from '../predictors/valuePredictor';
+import { PageLoadingValidator } from '../validators/pageLoadingValidator';
+import { PageValidationResult } from '../types/pageValidation';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -128,12 +130,18 @@ export class PredictionValidator {
   private adminClient: GA4AdminClient | null = null;
   private browser: Browser | null = null;
   private predictor: ValuePredictor;
+  private pageLoadingValidator: PageLoadingValidator;
   private accessToken: string;
   private outputDir: string;
 
   constructor(accessToken: string, outputDir?: string) {
     this.accessToken = accessToken;
     this.predictor = new ValuePredictor();
+    this.pageLoadingValidator = new PageLoadingValidator({
+      useVisionAI: true,
+      visionMode: 'on-missing',  // 누락된 컴포넌트가 있을 때만 Vision AI 사용
+      verbose: false,
+    });
     this.outputDir = outputDir || path.join(process.cwd(), 'output/validation');
   }
 
@@ -506,6 +514,32 @@ export class PredictionValidator {
 
       // 추가 대기 (동적 로딩 완료)
       await page.waitForTimeout(2000);
+
+      // 페이지 로딩 검증 (하이브리드: DOM Fast Check → Vision AI Deep Check)
+      try {
+        const pageValidation = await this.pageLoadingValidator.validate(page, pageUrl);
+        this.pageLoadingValidator.logResult(pageValidation);
+
+        // 검증 결과를 devVars에 기록 (경고 후 계속 진행)
+        if (pageValidation.status === 'ERROR_PAGE') {
+          devVars._pageValidation = 'ERROR_PAGE';
+          devVars._validationWarning = pageValidation.errorMessage || '에러 페이지 감지';
+        } else if (pageValidation.status === 'EMPTY') {
+          devVars._pageValidation = 'EMPTY';
+          devVars._validationWarning = '빈 페이지';
+        } else if (pageValidation.status === 'WRONG_TYPE') {
+          devVars._pageValidation = 'WRONG_TYPE';
+          devVars._validationWarning = `예상 타입(${pageValidation.expectedPageType})과 다름`;
+        } else if (pageValidation.status === 'PARTIAL') {
+          devVars._pageValidation = 'PARTIAL';
+          devVars._validationWarning = `누락: ${pageValidation.missingComponents.join(', ')}`;
+        } else if (pageValidation.status === 'VALID') {
+          devVars._pageValidation = 'VALID';
+        }
+      } catch (validationError: any) {
+        console.log(`   ⚠️ 페이지 검증 실패: ${validationError.message}`);
+        // 검증 실패해도 계속 진행
+      }
 
       // 1. window 전역 변수 수집
       const windowVars = await page.evaluate(() => {
