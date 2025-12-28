@@ -684,6 +684,9 @@ export class PredictionValidator {
 
   /**
    * GA4에서 실제 파라미터 값 조회
+   *
+   * 주의: content_group, traffic_type 등은 GA4에 커스텀 차원으로 등록되어 있지 않음
+   * 등록된 차원만 조회하여 INVALID_ARGUMENT 오류 방지
    */
   async getGA4Values(
     propertyId: string,
@@ -697,14 +700,22 @@ export class PredictionValidator {
 
     const values: GA4ActualValues = {};
 
-    // page_view 이벤트의 커스텀 파라미터 값 조회
-    const customDimensions = [
+    // 등록된 커스텀 차원만 조회 (content_group, traffic_type은 미등록)
+    // 캐시된 커스텀 차원 목록 확인
+    const registeredDimensions = await this.getRegisteredDimensions(propertyId);
+
+    // 조회할 차원 목록 (등록된 것만)
+    const targetDimensions = [
       'site_name', 'site_country', 'site_language', 'site_env',
-      'channel', 'content_group', 'login_is_login', 'traffic_type',
-    ];
+      'channel', 'login_is_login',
+    ].filter(dim => registeredDimensions.includes(dim));
+
+    if (targetDimensions.length === 0) {
+      return values;
+    }
 
     try {
-      for (const dim of customDimensions) {
+      for (const dim of targetDimensions) {
         const [response] = await (ga4Client as any).client.runReport({
           property: `properties/${propertyId}`,
           dateRanges: [{ startDate: '7daysAgo', endDate: 'today' }],
@@ -751,6 +762,51 @@ export class PredictionValidator {
     }
 
     return values;
+  }
+
+  /**
+   * Property별 등록된 커스텀 차원 목록 조회
+   */
+  private registeredDimensionsCache: Map<string, string[]> = new Map();
+
+  private async getRegisteredDimensions(propertyId: string): Promise<string[]> {
+    // 캐시 확인
+    if (this.registeredDimensionsCache.has(propertyId)) {
+      return this.registeredDimensionsCache.get(propertyId)!;
+    }
+
+    // 파일 캐시 확인
+    const cachePath = path.join(process.cwd(), `cache/ga4/custom_dimensions_${propertyId}.json`);
+    if (fs.existsSync(cachePath)) {
+      try {
+        const cached = JSON.parse(fs.readFileSync(cachePath, 'utf-8'));
+        const dimensions = (cached.dimensions || [])
+          .filter((d: any) => d.scope === 'EVENT')
+          .map((d: any) => d.parameterName);
+        this.registeredDimensionsCache.set(propertyId, dimensions);
+        return dimensions;
+      } catch {
+        // 캐시 읽기 실패 시 기본 목록 반환
+      }
+    }
+
+    // Admin API로 조회 시도
+    try {
+      const adminClient = new GA4AdminClient(this.accessToken);
+      await adminClient.initialize();
+      const customDims = await adminClient.listCustomDimensions(propertyId);
+      const dimensions = customDims
+        .filter((d: any) => d.scope === 'EVENT')
+        .map((d: any) => d.parameterName);
+
+      this.registeredDimensionsCache.set(propertyId, dimensions);
+      return dimensions;
+    } catch {
+      // 조회 실패 시 기본 목록 반환
+      const defaultDims = ['site_name', 'site_country', 'site_language', 'site_env', 'channel', 'login_is_login'];
+      this.registeredDimensionsCache.set(propertyId, defaultDims);
+      return defaultDims;
+    }
   }
 
   /**

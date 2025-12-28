@@ -405,11 +405,14 @@ export class ValuePredictor {
    * 4. site_env - URL 패턴으로 환경 감지
    *
    * 호스트명 패턴 예시:
-   * - stg1-fo.innisfree.com → STG
-   * - stg1-m.innisfree.com → STG
+   * - stg1-fo.innisfree.com → QA (innisfree는 stg1을 QA로 사용)
+   * - stg1-m.innisfree.com → QA
    * - qa-www.amoremall.com → QA
    * - dev.amoremall.com → DEV
    * - www.amoremall.com → PRD
+   *
+   * 특이사항:
+   * - innisfree 테스트 서버는 URL이 stg1-*이지만 실제 AP_DATA_ENV는 QA로 설정됨
    */
   predictSiteEnv(context: PredictionContext): PredictionResult {
     const url = context.url.toLowerCase();
@@ -418,7 +421,19 @@ export class ValuePredictor {
     try {
       const hostname = new URL(context.url).hostname.toLowerCase();
 
-      // STG 패턴: stg, stg1-, stg2-, staging
+      // [2025-12-28 규칙 업데이트] innisfree stg1-* 서버는 QA 환경으로 설정됨
+      // URL 패턴: stg1-fo.innisfree.com, stg1-m.innisfree.com
+      if (/^stg\d*[-.]/.test(hostname) && hostname.includes('innisfree')) {
+        return {
+          key: 'site_env',
+          predictedValue: 'QA',
+          confidence: 'high',
+          predictionType: 'url_pattern',
+          notes: `innisfree 테스트 서버 (stg1 → QA): ${hostname}`,
+        };
+      }
+
+      // STG 패턴: stg, stg1-, stg2-, staging (innisfree 제외)
       if (/^stg\d*[-.]|^staging[-.]|[-.]stg\d*[-.]|[-.]staging[-.]/.test(hostname)) {
         return {
           key: 'site_env',
