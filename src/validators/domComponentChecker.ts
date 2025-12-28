@@ -12,7 +12,7 @@ import {
   ErrorPageDetection,
   LoginRequiredDetection,
 } from '../types/pageValidation';
-import { ERROR_KEYWORDS, LOGIN_KEYWORDS, getAllErrorKeywords } from './pageRequirementsConfig';
+import { ERROR_KEYWORDS, LOGIN_KEYWORDS, getAllErrorKeywords, ERROR_CONTEXT_KEYWORDS } from './pageRequirementsConfig';
 
 /**
  * DOM 기반 컴포넌트 검증기 클래스
@@ -56,28 +56,16 @@ export class DOMComponentChecker {
   }
 
   /**
-   * 에러 페이지 키워드 감지
+   * 에러 페이지 키워드 감지 (정밀 감지)
+   *
+   * 민감도 조정:
+   * 1. HTTP 상태 코드 400+ → 확실한 에러
+   * 2. 명확한 에러 키워드 발견 → 에러
+   * 3. 문맥 키워드 2개 이상 + 콘텐츠 적음 → 에러 가능성
    */
   async detectErrorPage(page: Page): Promise<ErrorPageDetection> {
     try {
-      const result = await page.evaluate((errorKeywords: string[]) => {
-        const bodyText = document.body?.innerText || '';
-        const title = document.title || '';
-        const combinedText = `${title} ${bodyText}`.toLowerCase();
-
-        for (const keyword of errorKeywords) {
-          if (combinedText.includes(keyword.toLowerCase())) {
-            return {
-              isError: true,
-              matchedKeyword: keyword,
-            };
-          }
-        }
-
-        return { isError: false };
-      }, getAllErrorKeywords());
-
-      // HTTP 상태 코드도 확인
+      // HTTP 상태 코드 우선 확인
       const httpStatus = this.getHttpStatus();
       if (httpStatus >= 400) {
         return {
@@ -88,12 +76,62 @@ export class DOMComponentChecker {
         };
       }
 
+      const result = await page.evaluate(
+        (params: { errorKeywords: string[]; contextKeywords: string[] }) => {
+          const bodyText = document.body?.innerText || '';
+          const title = document.title || '';
+          const combinedText = `${title} ${bodyText}`;
+          const combinedTextLower = combinedText.toLowerCase();
+
+          // 페이지 콘텐츠 양 확인 (에러 페이지는 보통 콘텐츠가 적음)
+          const contentLength = bodyText.trim().length;
+          const isLowContent = contentLength < 500;
+
+          // 명확한 에러 키워드 검색
+          for (const keyword of params.errorKeywords) {
+            if (combinedTextLower.includes(keyword.toLowerCase())) {
+              return {
+                isError: true,
+                matchedKeyword: keyword,
+                detectionType: 'EXACT_MATCH',
+              };
+            }
+          }
+
+          // 문맥 키워드 카운트 (복합 조건)
+          let contextMatchCount = 0;
+          const matchedContextKeywords: string[] = [];
+
+          for (const keyword of params.contextKeywords) {
+            if (combinedTextLower.includes(keyword.toLowerCase())) {
+              contextMatchCount++;
+              matchedContextKeywords.push(keyword);
+            }
+          }
+
+          // 문맥 키워드 2개 이상 + 콘텐츠 적음 = 에러 가능성 높음
+          if (contextMatchCount >= 2 && isLowContent) {
+            return {
+              isError: true,
+              matchedKeyword: matchedContextKeywords.join(', '),
+              detectionType: 'CONTEXT_MATCH',
+            };
+          }
+
+          return { isError: false };
+        },
+        { errorKeywords: getAllErrorKeywords(), contextKeywords: ERROR_CONTEXT_KEYWORDS }
+      );
+
       if (result.isError) {
         return {
           isError: true,
           errorType: 'KEYWORD',
           matchedKeyword: result.matchedKeyword,
-          message: `에러 키워드 감지: ${result.matchedKeyword}`,
+          message:
+            result.detectionType === 'EXACT_MATCH'
+              ? `에러 키워드 감지: ${result.matchedKeyword}`
+              : `에러 문맥 감지: ${result.matchedKeyword}`,
         };
       }
 

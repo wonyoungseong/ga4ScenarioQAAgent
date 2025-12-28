@@ -7,49 +7,82 @@
 import { ComponentRequirement, PageTypeRequirement } from '../types/pageValidation';
 
 /**
- * 에러 페이지 감지용 키워드
+ * 에러 페이지 감지용 키워드 (정밀 감지)
+ *
+ * 민감도 조정:
+ * - 숫자만 있는 키워드(404, 500 등)는 제외 (가격, 상품코드와 혼동 방지)
+ * - 구체적인 에러 문구만 포함
+ * - 문맥이 명확한 키워드 우선
  */
 export const ERROR_KEYWORDS = {
-  // 404 관련
+  // 404 관련 (구체적 문구만)
   notFound: [
-    '404',
     'Page Not Found',
     'Not Found',
-    '페이지를 찾을 수 없',
-    '존재하지 않는 페이지',
-    '요청하신 페이지',
-    'The page you requested',
+    '페이지를 찾을 수 없습니다',
+    '존재하지 않는 페이지입니다',
+    '요청하신 페이지를 찾을 수 없습니다',
+    'The page you requested could not be found',
+    '404 에러',
+    '404 오류',
+    'Error 404',
+    '404 Error',
   ],
-  // 500 관련
+  // 500 관련 (구체적 문구만)
   serverError: [
-    '500',
     'Internal Server Error',
     'Server Error',
-    '서버 오류',
-    '서버 에러',
-    '일시적인 오류',
-    '잠시 후 다시',
+    '서버 오류가 발생했습니다',
+    '서버에 문제가 발생했습니다',
+    '500 에러',
+    '500 오류',
+    'Error 500',
+    '500 Error',
     'Something went wrong',
+    'Oops! Something went wrong',
   ],
-  // 접근 제한
+  // 접근 제한 (구체적 문구만)
   accessDenied: [
-    '403',
     'Forbidden',
     'Access Denied',
-    '접근할 수 없',
-    '접근 권한',
-    '접근이 제한',
+    '접근할 수 없습니다',
+    '접근 권한이 없습니다',
+    '접근이 제한되었습니다',
     'Permission Denied',
+    '403 에러',
+    '403 오류',
+    'Error 403',
   ],
-  // 일반 에러
+  // 일반 에러 (구체적 문구만)
   general: [
-    '오류가 발생',
-    '문제가 발생',
+    '오류가 발생했습니다',
+    '문제가 발생했습니다',
     'Error occurred',
-    '에러가 발생',
+    '에러가 발생했습니다',
     'An error has occurred',
+    '시스템 오류',
+    '페이지를 표시할 수 없습니다',
+    '서비스 점검 중입니다',
+    '현재 서비스 이용이 불가능합니다',
   ],
 };
+
+/**
+ * 에러 페이지 감지 강화 키워드 (복합 조건)
+ * 이 키워드들 중 2개 이상 발견 시 에러로 판단
+ */
+export const ERROR_CONTEXT_KEYWORDS = [
+  '죄송합니다',
+  'Sorry',
+  '일시적',
+  '잠시 후',
+  '다시 시도',
+  '새로고침',
+  '돌아가기',
+  'Go back',
+  'Try again',
+  'Refresh',
+];
 
 /**
  * 로그인 필요 감지용 키워드
