@@ -244,6 +244,9 @@ export class PredictionValidator {
 
   /**
    * Property의 content_group별 대표 페이지 조회
+   *
+   * 중요: pagePath 대신 pageLocation(완전한 URL)을 사용하여
+   * 실제 접근 가능한 URL을 확보합니다.
    */
   async getContentGroupPages(
     propertyId: string,
@@ -256,6 +259,7 @@ export class PredictionValidator {
     await ga4Client.initialize();
 
     console.log(`\n📊 Property ${propertyId}의 content_group별 페이지 조회 중...`);
+    console.log(`   📍 pageLocation(완전한 URL) 기반으로 조회`);
 
     // 시도할 content_group 차원 이름들 (사이트마다 다를 수 있음)
     const possibleDimensionNames = [
@@ -268,7 +272,7 @@ export class PredictionValidator {
     let response: any = null;
     let usedDimensionName = '';
 
-    // 각 차원 이름을 시도
+    // 각 차원 이름을 시도 (pageLocation 사용)
     for (const dimName of possibleDimensionNames) {
       try {
         const [resp] = await (ga4Client as any).client.runReport({
@@ -276,7 +280,7 @@ export class PredictionValidator {
           dateRanges: [{ startDate: '7daysAgo', endDate: 'today' }],
           dimensions: [
             { name: dimName },
-            { name: 'pagePath' },
+            { name: 'pageLocation' },  // 완전한 URL 사용
           ],
           metrics: [{ name: 'eventCount' }],
           dimensionFilter: {
@@ -300,13 +304,13 @@ export class PredictionValidator {
       }
     }
 
-    // 모든 차원 이름 실패 시 pagePath만으로 폴백
+    // 모든 차원 이름 실패 시 pageLocation만으로 폴백
     if (!response) {
-      console.log(`   ⚠️ content_group 차원 없음, pagePath로 폴백`);
+      console.log(`   ⚠️ content_group 차원 없음, pageLocation으로 폴백`);
       const [fallbackResp] = await (ga4Client as any).client.runReport({
         property: `properties/${propertyId}`,
         dateRanges: [{ startDate: '7daysAgo', endDate: 'today' }],
-        dimensions: [{ name: 'pagePath' }],
+        dimensions: [{ name: 'pageLocation' }],  // 완전한 URL 사용
         metrics: [{ name: 'eventCount' }],
         dimensionFilter: {
           filter: {
@@ -320,13 +324,16 @@ export class PredictionValidator {
         limit: 100,
       });
 
-      // pagePath에서 content_group 추론
+      // pageLocation에서 content_group 추론
       const contentGroupMap = new Map<string, ContentGroupPage>();
       if (fallbackResp.rows) {
         for (const row of fallbackResp.rows) {
-          const pagePath = row.dimensionValues?.[0]?.value || '';
+          const pageLocation = row.dimensionValues?.[0]?.value || '';
           const count = parseInt(row.metricValues?.[0]?.value || '0', 10);
-          if (!pagePath) continue;
+          if (!pageLocation) continue;
+
+          // URL에서 pagePath 추출
+          const pagePath = this.extractPathFromUrl(pageLocation);
 
           // URL 패턴에서 content_group 추론
           const inferredCG = this.inferContentGroupFromPath(pagePath);
@@ -334,10 +341,12 @@ export class PredictionValidator {
 
           const existing = contentGroupMap.get(inferredCG);
           if (!existing || count > existing.pageViewCount) {
+            // 쿼리 파라미터 제거한 깨끗한 URL 사용
+            const cleanUrl = this.cleanPageLocation(pageLocation);
             contentGroupMap.set(inferredCG, {
               contentGroup: inferredCG,
               pagePath,
-              pageUrl: `https://${domain}${pagePath}`,
+              pageUrl: cleanUrl,
               pageViewCount: count,
             });
           }
@@ -352,18 +361,23 @@ export class PredictionValidator {
     if (response.rows) {
       for (const row of response.rows) {
         const contentGroup = row.dimensionValues?.[0]?.value || '(not set)';
-        const pagePath = row.dimensionValues?.[1]?.value || '';
+        const pageLocation = row.dimensionValues?.[1]?.value || '';
         const count = parseInt(row.metricValues?.[0]?.value || '0', 10);
 
-        if (contentGroup === '(not set)' || !pagePath) continue;
+        if (contentGroup === '(not set)' || !pageLocation) continue;
+
+        // URL에서 pagePath 추출
+        const pagePath = this.extractPathFromUrl(pageLocation);
 
         // 이미 있는 content_group이면 page_view가 더 많은 것만 업데이트
         const existing = contentGroupMap.get(contentGroup);
         if (!existing || count > existing.pageViewCount) {
+          // 쿼리 파라미터 제거한 깨끗한 URL 사용 (검색 페이지 등 제외)
+          const cleanUrl = this.cleanPageLocation(pageLocation, contentGroup);
           contentGroupMap.set(contentGroup, {
             contentGroup,
             pagePath,
-            pageUrl: `https://${domain}${pagePath}`,
+            pageUrl: cleanUrl,
             pageViewCount: count,
           });
         }
@@ -373,10 +387,65 @@ export class PredictionValidator {
     const result = Array.from(contentGroupMap.values());
     console.log(`   발견된 content_group: ${result.length}개`);
     for (const cg of result) {
-      console.log(`   - ${cg.contentGroup}: ${cg.pagePath} (${cg.pageViewCount.toLocaleString()} views)`);
+      console.log(`   - ${cg.contentGroup}: ${cg.pageUrl} (${cg.pageViewCount.toLocaleString()} views)`);
     }
 
     return result;
+  }
+
+  /**
+   * pageLocation에서 경로(path) 추출
+   */
+  private extractPathFromUrl(pageLocation: string): string {
+    try {
+      const url = new URL(pageLocation);
+      return url.pathname;
+    } catch {
+      // URL 파싱 실패 시 그대로 반환
+      return pageLocation;
+    }
+  }
+
+  /**
+   * pageLocation 정리 (불필요한 쿼리 파라미터 제거)
+   * 단, 검색 페이지 등 쿼리가 필수인 경우 유지
+   */
+  private cleanPageLocation(pageLocation: string, contentGroup?: string): string {
+    try {
+      const url = new URL(pageLocation);
+
+      // 검색 결과 페이지는 keyword/query 파라미터 유지
+      if (contentGroup === 'SEARCH_RESULT' || url.pathname.includes('/search')) {
+        const keyword = url.searchParams.get('keyword') || url.searchParams.get('query') || url.searchParams.get('q');
+        if (keyword) {
+          return `${url.origin}${url.pathname}?keyword=${encodeURIComponent(keyword)}`;
+        }
+      }
+
+      // 상품 상세 페이지는 상품 ID 파라미터 유지
+      if (contentGroup === 'PRODUCT_DETAIL' || url.pathname.includes('/product')) {
+        const productId = url.searchParams.get('onlineProdCode') || url.searchParams.get('productId') || url.searchParams.get('id');
+        if (productId) {
+          const paramName = url.searchParams.has('onlineProdCode') ? 'onlineProdCode' :
+                           url.searchParams.has('productId') ? 'productId' : 'id';
+          return `${url.origin}${url.pathname}?${paramName}=${encodeURIComponent(productId)}`;
+        }
+      }
+
+      // 이벤트 상세 페이지는 이벤트 코드 유지
+      if (contentGroup === 'EVENT_DETAIL' || url.pathname.includes('/event/')) {
+        const eventCode = url.searchParams.get('planDisplaySn') || url.searchParams.get('eventCode');
+        if (eventCode) {
+          const paramName = url.searchParams.has('planDisplaySn') ? 'planDisplaySn' : 'eventCode';
+          return `${url.origin}${url.pathname}?${paramName}=${encodeURIComponent(eventCode)}`;
+        }
+      }
+
+      // 기타 페이지는 쿼리 파라미터 제거
+      return `${url.origin}${url.pathname}`;
+    } catch {
+      return pageLocation;
+    }
   }
 
   /**

@@ -130,15 +130,17 @@ const LANGUAGE_TO_COUNTRY_MAP: Record<string, string> = {
 
 /**
  * URL에서 language 코드 추출
+ * - /ko/ 패턴: 경로 중간
+ * - /ko$ 패턴: 경로 끝 (예: osulloc.com/kr/ko)
  */
 const LANGUAGE_PATTERNS: Array<{ pattern: RegExp; value: string }> = [
-  { pattern: /\/ko\//i, value: 'KO' },
-  { pattern: /\/en\//i, value: 'EN' },
-  { pattern: /\/ja\//i, value: 'JA' },
-  { pattern: /\/zh\//i, value: 'ZH' },
-  { pattern: /\/vi\//i, value: 'VI' },
-  { pattern: /\/th\//i, value: 'TH' },
-  { pattern: /\/id\//i, value: 'ID' },
+  { pattern: /\/ko(?:\/|$|\?)/i, value: 'KO' },  // /ko/ 또는 /ko로 끝남 또는 /ko?로 쿼리 시작
+  { pattern: /\/en(?:\/|$|\?)/i, value: 'EN' },
+  { pattern: /\/ja(?:\/|$|\?)/i, value: 'JA' },
+  { pattern: /\/zh(?:\/|$|\?)/i, value: 'ZH' },
+  { pattern: /\/vi(?:\/|$|\?)/i, value: 'VI' },
+  { pattern: /\/th(?:\/|$|\?)/i, value: 'TH' },
+  { pattern: /\/id(?:\/|$|\?)/i, value: 'ID' },
 ];
 
 /**
@@ -401,24 +403,106 @@ export class ValuePredictor {
 
   /**
    * 4. site_env - URL 패턴으로 환경 감지
+   *
+   * 호스트명 패턴 예시:
+   * - stg1-fo.innisfree.com → STG
+   * - stg1-m.innisfree.com → STG
+   * - qa-www.amoremall.com → QA
+   * - dev.amoremall.com → DEV
+   * - www.amoremall.com → PRD
    */
   predictSiteEnv(context: PredictionContext): PredictionResult {
     const url = context.url.toLowerCase();
-    const envPatterns = [
-      { pattern: /dev\.|dev-|\/dev\//i, value: 'DEV' },
-      { pattern: /stg\.|stg-|staging\.|\/stg\//i, value: 'STG' },
-      { pattern: /local\.|localhost|127\.0\.0\.1/i, value: 'LOCAL' },
-      { pattern: /beta\.|\/beta\//i, value: 'BETA' },
-      { pattern: /test\.|test-|\/test\//i, value: 'DEV' },
+
+    // 호스트명에서 환경 감지 (우선순위 높음)
+    try {
+      const hostname = new URL(context.url).hostname.toLowerCase();
+
+      // STG 패턴: stg, stg1-, stg2-, staging
+      if (/^stg\d*[-.]|^staging[-.]|[-.]stg\d*[-.]|[-.]staging[-.]/.test(hostname)) {
+        return {
+          key: 'site_env',
+          predictedValue: 'STG',
+          confidence: 'high',
+          predictionType: 'url_pattern',
+          notes: `호스트명 패턴: ${hostname}`,
+        };
+      }
+
+      // QA 패턴: qa, qa1-, qa2-
+      if (/^qa\d*[-.]|[-.]qa\d*[-.]/.test(hostname)) {
+        return {
+          key: 'site_env',
+          predictedValue: 'QA',
+          confidence: 'high',
+          predictionType: 'url_pattern',
+          notes: `호스트명 패턴: ${hostname}`,
+        };
+      }
+
+      // DEV 패턴: dev, dev1-, dev2-, develop
+      if (/^dev\d*[-.]|^develop[-.]|[-.]dev\d*[-.]/.test(hostname)) {
+        return {
+          key: 'site_env',
+          predictedValue: 'DEV',
+          confidence: 'high',
+          predictionType: 'url_pattern',
+          notes: `호스트명 패턴: ${hostname}`,
+        };
+      }
+
+      // LOCAL 패턴
+      if (/^localhost|^127\.0\.0\.1|^local[-.]/.test(hostname)) {
+        return {
+          key: 'site_env',
+          predictedValue: 'LOCAL',
+          confidence: 'high',
+          predictionType: 'url_pattern',
+          notes: `로컬 환경: ${hostname}`,
+        };
+      }
+
+      // BETA 패턴
+      if (/^beta\d*[-.]|[-.]beta\d*[-.]/.test(hostname)) {
+        return {
+          key: 'site_env',
+          predictedValue: 'BETA',
+          confidence: 'high',
+          predictionType: 'url_pattern',
+          notes: `호스트명 패턴: ${hostname}`,
+        };
+      }
+
+      // TEST 패턴 → DEV로 처리
+      if (/^test\d*[-.]|[-.]test\d*[-.]/.test(hostname)) {
+        return {
+          key: 'site_env',
+          predictedValue: 'DEV',
+          confidence: 'high',
+          predictionType: 'url_pattern',
+          notes: `테스트 환경: ${hostname}`,
+        };
+      }
+    } catch {
+      // URL 파싱 실패 시 폴백
+    }
+
+    // 경로 패턴 폴백
+    const pathPatterns = [
+      { pattern: /\/dev\//i, value: 'DEV' },
+      { pattern: /\/stg\//i, value: 'STG' },
+      { pattern: /\/qa\//i, value: 'QA' },
+      { pattern: /\/beta\//i, value: 'BETA' },
     ];
 
-    for (const { pattern, value } of envPatterns) {
+    for (const { pattern, value } of pathPatterns) {
       if (pattern.test(url)) {
         return {
           key: 'site_env',
           predictedValue: value,
-          confidence: 'high',
+          confidence: 'medium',
           predictionType: 'url_pattern',
+          notes: '경로 패턴',
         };
       }
     }
@@ -538,15 +622,19 @@ export class ValuePredictor {
   }
 
   /**
-   * 9. traffic_type - 내부 로직
+   * 9. traffic_type - GTM 내부에서 결정 (예측 스킵)
+   *
+   * traffic_type은 GTM 내부 로직에서 다음 기준으로 결정:
+   * - referrer, UTM 파라미터, 내부/외부 트래픽 등
+   * - 예측 불가능하므로 스킵 처리
    */
   predictTrafficType(context: PredictionContext): PredictionResult {
     return {
       key: 'traffic_type',
-      predictedValue: 'external',
-      confidence: 'medium',
-      predictionType: 'internal_logic',
-      notes: '기본값 (일반 사용자)',
+      predictedValue: null,
+      confidence: 'skip',
+      predictionType: 'gtm_internal',
+      notes: 'GTM 내부 로직에서 동적 결정 (referrer, UTM 등)',
     };
   }
 
@@ -834,10 +922,45 @@ export class ValuePredictor {
     let notes = '';
 
     if (key === 'view_event_code') {
-      const eventCodeMatch = context.url.match(/\/event\/([^/?]+)/i) ||
-        context.url.match(/[?&]eventCode=([^&]+)/i);
-      predictedValue = eventCodeMatch?.[1] || null;
-      notes = eventCodeMatch ? 'URL에서 추출' : 'URL에서 이벤트 코드를 찾을 수 없음';
+      // view_event_code 추출 로직 개선
+      // URL 패턴 예시:
+      // - /event/view/12292 → 12292
+      // - /event/eventView/EVT2301SKINCARE.do → EVT2301SKINCARE
+      // - /event/102369 → 102369
+      // - /kr/ko/ca/event/102369 → 102369
+      // - ?eventCode=XXX → XXX
+
+      // 우선순위 1: 쿼리 파라미터
+      const queryMatch = context.url.match(/[?&]eventCode=([^&]+)/i);
+      if (queryMatch) {
+        predictedValue = queryMatch[1];
+        notes = 'URL 쿼리 파라미터에서 추출';
+      } else {
+        // 우선순위 2: URL 경로에서 이벤트 코드 추출
+        const pathAfterEvent = context.url.match(/\/event\/(.+?)(?:[?#]|$)/i)?.[1] || '';
+        const segments = pathAfterEvent.split('/').filter(s => s && s !== '');
+
+        // 스킵할 중간 경로 키워드
+        const skipKeywords = ['view', 'detail', 'eventview', 'list', 'event', 'page'];
+
+        // 마지막 세그먼트부터 역순으로 이벤트 코드 패턴 찾기
+        for (let i = segments.length - 1; i >= 0; i--) {
+          let segment = segments[i].replace(/\.do$/i, ''); // .do 제거
+          if (skipKeywords.includes(segment.toLowerCase())) continue;
+
+          // 유효한 이벤트 코드 패턴: 숫자, EVT 접두어, 또는 의미있는 코드
+          if (/^\d+$/.test(segment) || /^EVT/i.test(segment) ||
+              (segment.length > 3 && /^[A-Z0-9_-]+$/i.test(segment))) {
+            predictedValue = segment;
+            notes = 'URL 경로에서 추출';
+            break;
+          }
+        }
+
+        if (!predictedValue) {
+          notes = 'URL에서 이벤트 코드를 찾을 수 없음';
+        }
+      }
     } else if (key === 'view_event_name') {
       // view_event_name은 페이지에서만 알 수 있음 (AP_PROMO_NAME)
       // Vision AI나 pageTitle이 없으면 예측 불가 → skip 처리
