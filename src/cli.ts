@@ -1152,4 +1152,60 @@ funnel
 program.addCommand(createBranchCommands());
 program.addCommand(createTestCommands());
 
+// ============================================================================
+// QA 통합 예측 명령어
+// ============================================================================
+program
+  .command('qa-predict')
+  .description('URL 기반 통합 QA 예측 - 이벤트, 파라미터, 값 예측')
+  .requiredOption('-u, --url <url>', '분석할 페이지 URL')
+  .option('-o, --output <format>', '출력 형식 (console, json)', 'console')
+  .option('-v, --validate', '실제 dataLayer 검증 포함 (Playwright 사용)')
+  .option('--vision', 'Vision AI로 화면 기반 값 추출 (item_name, price 등)')
+  .option('--verbose', '상세 출력')
+  .action(async (options) => {
+    const { UnifiedEventPredictor } = await import('./predictors/unifiedEventPredictor');
+
+    const visionLabel = options.vision ? ' + Vision AI' : '';
+    console.log(chalk.cyan('\n╔════════════════════════════════════════════════════════════════╗'));
+    console.log(chalk.cyan('║') + chalk.yellow.bold(`         🎯 통합 QA 예측 시스템 v1.1.0${visionLabel}`.padEnd(57)) + chalk.cyan('║'));
+    console.log(chalk.cyan('║') + chalk.gray('         URL → 이벤트 → 파라미터 → 값 예측                     ') + chalk.cyan('║'));
+    console.log(chalk.cyan('╚════════════════════════════════════════════════════════════════╝\n'));
+
+    try {
+      const predictor = new UnifiedEventPredictor();
+      const prediction = await predictor.predict({
+        url: options.url,
+        validate: options.validate,
+        useVisionAI: options.vision,
+        verbose: options.verbose,
+        outputFormat: options.output,
+      });
+
+      if (options.output === 'json') {
+        console.log(JSON.stringify(prediction, null, 2));
+      } else {
+        console.log(predictor.formatOutput(prediction));
+      }
+
+      // JSON 파일로도 저장
+      const outputDir = './output/qa-predict';
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+      }
+
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const outputPath = path.join(outputDir, `prediction_${timestamp}.json`);
+      fs.writeFileSync(outputPath, JSON.stringify(prediction, null, 2));
+      console.log(chalk.gray(`\n💾 결과 저장됨: ${outputPath}`));
+
+    } catch (error: any) {
+      console.error(chalk.red(`\n❌ 오류 발생: ${error.message}`));
+      if (options.verbose) {
+        console.error(error.stack);
+      }
+      process.exit(1);
+    }
+  });
+
 program.parse();
