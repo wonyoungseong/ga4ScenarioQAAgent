@@ -15,7 +15,12 @@
     "test:content-groups:parallel": "ts-node src/test-content-groups-parallel.ts",
     "test:parameter-prediction": "ts-node src/test-parameter-prediction.ts",
     "load:params": "ts-node src/load-parameter-mapping.ts",
-    "load:params:fresh": "ts-node src/load-parameter-mapping.ts --no-cache"
+    "load:params:fresh": "ts-node src/load-parameter-mapping.ts --no-cache",
+    "dev:qa": "ts-node src/cli-qa.ts",
+    "qa:global": "ts-node src/cli-qa.ts global-variable",
+    "qa:event": "ts-node src/cli-qa.ts event-qa",
+    "merge:excel": "ts-node src/merge-excel.ts",
+    "merge:event-excel": "ts-node src/merge-event-excel.ts"
   },
   "dependencies": {
     "@google-analytics/admin": "^9.0.1",
@@ -27,12 +32,17 @@
     "google-auth-library": "^10.5.0",
     "js-yaml": "^4.1.1",
     "pdf-parse": "^1.1.1",
-    "playwright": "^1.40.0"
+    "playwright": "^1.40.0",
+    "exceljs": "^4.4.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.10.0",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
-    "typescript": "^5.3.0"
+    "typescript": "^5.9.3"
   }
 }
